@@ -33,8 +33,8 @@ def download_data(symbol, interval, start_time, end_time):
         if data:
             df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover'])
             df = df.sort_values('startTime', ascending=True)
-            df.to_csv(f"data/kline_{symbol}_{interval}_{start_time}_{end_time}.csv", index=False)
-            print(f"Saved: data/kline_{symbol}_{interval}_{start_time}_{end_time}.csv")
+            df.to_csv(f"data/kline/{symbol}_{interval}_{start_time}_{end_time}.csv", index=False)
+            print(f"Saved: data/kline/{symbol}_{interval}_{start_time}_{end_time}.csv")
         else:
             break
 
@@ -47,6 +47,6 @@ def download_data(symbol, interval, start_time, end_time):
 symbol = "BTCUSDT"
 interval = "1"  # 1-minute candles
 end_time = int(time.time() * 1000)  # Current timestamp in milliseconds
-start_time = end_time - (3 * 60 * 60 * 1000)  # 24 hours ago
+start_time = end_time - (48 * 60 * 60 * 1000)  # N hours ago
 
 download_data(symbol, interval, start_time, end_time)
