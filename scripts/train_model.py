@@ -43,7 +43,8 @@ features_orderbook = df_merged[['mid_price_mean', 'mid_price_std', 'mid_price_mi
                                 'volume_imbalance_ratio_mean', 'volume_imbalance_ratio_std',
                                 'cumulative_delta_volume_last', 'liquidity_pressure_ratio_mean', 'liquidity_pressure_ratio_std', 
                                 'mean_ask_size_mean', 'mean_ask_size_std', 'mean_bid_size_mean', 'mean_bid_size_std',
-                                'std_ask_size_mean', 'std_bid_size_mean']]
+                                'std_ask_size_mean', 'std_bid_size_mean',
+                                'realized_volatility']]
 
 # Define Target (Next Close Price)
 target = df_merged['closePrice'].shift(-1)  # Shift by 1 to predict the next closePrice

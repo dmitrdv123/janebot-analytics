@@ -149,6 +149,9 @@ df_features_agg = df_features.groupby('timestamp').agg(agg_funcs)
 df_features_agg.columns = ['_'.join(col).strip() for col in df_features_agg.columns]
 df_features_agg.reset_index(inplace=True)
 
+# Calculate Realized Volatility (1-min window): std of returns
+df_features_agg['realized_volatility'] = df_features_agg['mid_price_std'] / df_features_agg['mid_price_mean']
+
 # Print sample of feature dataframe
 print(df_features_agg.head())
 
