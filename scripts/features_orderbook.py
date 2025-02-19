@@ -117,8 +117,7 @@ df_features = process_order_book(file_path)
 df_features['timestamp'] = pd.to_datetime(df_features['timestamp'], unit='ms')  # Assuming milliseconds
 
 # Round timestamp to the nearest minute
-df_features['timestamp'] = df_features['timestamp'].dt.floor('min')  
-df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
+df_features['timestamp'] = df_features['timestamp'].dt.floor('min')
 
 # Aggregate order book features per minute
 agg_funcs = {
@@ -151,6 +150,12 @@ df_features_agg.reset_index(inplace=True)
 
 # Calculate Realized Volatility (1-min window): std of returns
 df_features_agg['realized_volatility'] = df_features_agg['mid_price_std'] / df_features_agg['mid_price_mean']
+
+# Convert startTime to timestamp
+df_features_agg['timestamp'] = df_features_agg['timestamp'].astype('int64') // 10**6
+
+# Drop NaN values from rolling calculations
+df_features_agg.dropna(inplace=True)
 
 # Print sample of feature dataframe
 print(df_features_agg.head())

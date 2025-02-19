@@ -59,6 +59,12 @@ df_features['sentiment'] = df_features['fundingRate'].apply(lambda x: 'long-bias
 # Lagged feature
 df_features['fundingRateLag1'] = df_features['fundingRate'].shift(1)
 
+# Convert startTime to timestamp
+df_features['fundingRateTimestamp'] = df_features['fundingRateTimestamp'].astype('int64') // 10**6
+
+# Drop NaN values from rolling calculations
+df_features.dropna(inplace=True)
+
 # Print sample of feature dataframe
 print(df_features.head())
 
