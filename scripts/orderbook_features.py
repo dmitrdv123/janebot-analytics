@@ -139,7 +139,15 @@ agg_funcs = {
     'mean_ask_size': ['mean', 'std'],
     'mean_bid_size': ['mean', 'std'],
     'std_ask_size': ['mean'],
-    'std_bid_size': ['mean']
+    'std_bid_size': ['mean'],
+    'best_bid_price': ['mean', 'std'],
+    'best_ask_price': ['mean', 'std'],
+    'mean_bid_price': ['mean'],
+    'mean_ask_price': ['mean'],
+    'mean_mid_price': ['mean'],
+    'std_bid_price': ['std'],
+    'std_ask_price': ['std'],
+    'std_mid_price': ['std']
 }
 
 # Perform aggregation
