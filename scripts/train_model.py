@@ -5,18 +5,18 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-kline_df = pd.read_csv('features/kline/1m/features.csv')
+df_kline = pd.read_csv('features/kline/1m/features.csv')
 
-# Assuming the data has been loaded and processed into 'kline_df'
+# Assuming the data has been loaded and processed into 'df_kline'
 # Extract features and target
-features = kline_df[['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover',
+features = df_kline[['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover',
                      'priceChange', 'logReturn', 'SMA_5', 'SMA_10', 'EMA_5', 'EMA_10', 
                      'hourOfDay', 'dayOfWeek', 'weekOfYear', 'monthOfYear', 'minuteOfHour', 
                      'isWeekend', 'highLowRange', 'stdReturn_5m', 'stdReturn_10m', 
                      'RSI_14', 'MACD_line', 'MACD_signal', 'MACD_histogram', 
                      'Stochastic_K', 'Stochastic_D', 'ROC_14']]
 
-target = kline_df['closePrice'].shift(-1)  # Shift by 1 to predict the next closePrice
+target = df_kline['closePrice'].shift(-1)  # Shift by 1 to predict the next closePrice
 target = target.dropna()  # Drop last row because it has NaN value after shift
 features = features.iloc[:-1]  # Drop the last row from features to match target size
 
