@@ -15,7 +15,7 @@ def fetch_ohlcv(symbol, interval, start_time, end_time, limit):
   response = client.get_kline(symbol=symbol, interval=interval, start=start_time, end=end_time, limit=limit)
 
   if response['retCode'] != 0:
-    raise Exception(f'Error fetching kline data: {response['retMsg']}')
+    raise Exception(f'Error fetching kline data: {response["retMsg"]}')
 
   data = response['result']['list']
   return data
@@ -27,7 +27,7 @@ def download_data(symbol, interval, start_time, end_time, folder):
     hour_end_time = min(start_time + (60 * 60 * 1000) - 1, end_time)  # Subtract 1 ms to avoid overlap
 
     # Fetch the data for this 1-hour chunk
-    print(f'Fetching data from {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time/1000))} to {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(hour_end_time/1000))}')
+    print(f'Fetching data from {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time/1000))} to {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(hour_end_time/1000))}')
     data = fetch_ohlcv(symbol, interval, start_time, hour_end_time, 60 // int(interval))
 
     if data:
@@ -48,6 +48,10 @@ symbol = 'BTCUSDT'
 interval = '1'  # 1-minute candles
 end_time = int(time.time() * 1000)  # Current timestamp in milliseconds
 start_time = end_time - (7 * 24 * 60 * 60 * 1000)  # N hours ago
-folder='data/kline/1m'
 
-download_data(symbol, interval, start_time, end_time, folder)
+download_data(symbol, interval, start_time, end_time, 'data/kline/1m')
+download_data(symbol, interval, start_time, end_time, 'data/kline/3m')
+download_data(symbol, interval, start_time, end_time, 'data/kline/5m')
+download_data(symbol, interval, start_time, end_time, 'data/kline/15m')
+download_data(symbol, interval, start_time, end_time, 'data/kline/30m')
+download_data(symbol, interval, start_time, end_time, 'data/kline/60m')
