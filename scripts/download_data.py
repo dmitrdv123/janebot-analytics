@@ -13,7 +13,8 @@ def split_time_range(start_time, end_time, hours=1):
   chunks = []
   while start_time < end_time:
     next_time = min(start_time + timedelta(hours=hours), end_time)
-    chunks.append((start_time, next_time))
+    chunk_end = next_time - timedelta(milliseconds=1) if next_time < end_time else end_time
+    chunks.append((start_time, chunk_end))
     start_time = next_time
   return chunks
 
