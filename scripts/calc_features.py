@@ -3,24 +3,24 @@ import os
 import numpy as np
 import pandas as pd
 
-from utils import ensure_directory
+from utils import calculate_macd, calculate_roc, calculate_rsi, calculate_stochastic, ensure_directory
 
-def load_data(base_folder_path: str, file_extension: str = ".csv"):
-  """
+def load_data(base_folder_path: str, file_extension: str = '.csv'):
+  '''
   Downloads all files from subfolders (organized by date) inside a given folder and combines them into a single dataset (DataFrame).
 
   Args:
   - base_folder_path (str): Path to the base folder containing subfolders (named by date).
-  - file_extension (str): Extension of files to download (default is ".csv").
+  - file_extension (str): Extension of files to download (default is '.csv').
 
   Returns:
   - pd.DataFrame: Combined dataset of all files in the subfolders.
-  """
+  '''
   all_files = []
 
   # Check if base folder exists
   if not os.path.exists(base_folder_path):
-    raise FileNotFoundError(f"The base folder {base_folder_path} does not exist.")
+    raise FileNotFoundError(f'The base folder {base_folder_path} does not exist.')
 
   # Iterate over the subfolders (which represent dates)
   for subfolder_name in os.listdir(base_folder_path):
@@ -28,14 +28,11 @@ def load_data(base_folder_path: str, file_extension: str = ".csv"):
 
     # Check if the subfolder is indeed a directory (i.e., not a file)
     if os.path.isdir(subfolder_path):
-      print(f"Reading from subfolder: {subfolder_path}")
-
       # Iterate over the files in the subfolder
       for filename in os.listdir(subfolder_path):
         # Filter based on file extension (e.g., CSV)
         if filename.endswith(file_extension):
           file_path = os.path.join(subfolder_path, filename)
-          print(f"Reading file: {file_path}")
           # Read file (assuming CSV for simplicity)
           df = pd.read_csv(file_path)
           all_files.append(df)
@@ -45,7 +42,7 @@ def load_data(base_folder_path: str, file_extension: str = ".csv"):
     combined_data = pd.concat(all_files, ignore_index=True)
     return combined_data
   else:
-    raise ValueError("No files found in the subfolders with the specified extension.")
+    raise ValueError('No files found in the subfolders with the specified extension.')
 
 def save_features(df, base_folder, symbol, interval=None):
   if interval:
@@ -55,42 +52,9 @@ def save_features(df, base_folder, symbol, interval=None):
   ensure_directory(date_folder)
   filename = f'{date_folder}/features.csv'
   df.to_csv(filename, index=False)
-  print(f'Data saved to {filename}')
+  print(f'Feature saved to {filename}')
 
-def calc_features_kline(symbol, interval):
-  # **RSI** (14-period as a common choice)
-  def calculate_rsi(df, period=14):
-      delta = df['closePrice'].diff()
-      gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-      loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-
-      rs = gain / loss
-      rsi = 100 - (100 / (1 + rs))
-      return rsi
-
-  # **MACD** (12-period and 26-period EMAs, and 9-period Signal line)
-  def calculate_macd(df, fast_period=12, slow_period=26, signal_period=9):
-      macd_line = df['closePrice'].ewm(span=fast_period, adjust=False).mean() - df['closePrice'].ewm(span=slow_period, adjust=False).mean()
-      signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
-      histogram = macd_line - signal_line
-      return macd_line, signal_line, histogram
-
-  # **Stochastic Oscillator** (14-period %K and %D)
-  def calculate_stochastic(df, period=14):
-      low_min = df['lowPrice'].rolling(window=period).min()
-      high_max = df['highPrice'].rolling(window=period).max()
-      k_line = 100 * (df['closePrice'] - low_min) / (high_max - low_min)
-      d_line = k_line.rolling(window=3).mean()  # 3-period %D
-      return k_line, d_line
-
-  # **Rate of Change (ROC)** - Percentage change over n-periods
-  def calculate_roc(df, period=14):
-      roc = ((df['closePrice'] - df['closePrice'].shift(period)) / df['closePrice'].shift(period)) * 100
-      return roc
-
-  # Load the Kline Data
-  df_features = load_data(f'data/kline/{symbol}/{interval}')
-
+def calc_features_kline_based(df_features):
   # Convert startTime to datetime format (assuming startTime column exists)
   df_features['startTime'] = pd.to_datetime(df_features['startTime'], unit='ms')
 
@@ -99,8 +63,6 @@ def calc_features_kline(symbol, interval):
   df_features['highPrice'] = df_features['highPrice'].astype(float)
   df_features['lowPrice'] = df_features['lowPrice'].astype(float)
   df_features['closePrice'] = df_features['closePrice'].astype(float)
-  df_features['volume'] = df_features['volume'].astype(float)
-  df_features['turnover'] = df_features['turnover'].astype(float)
 
   # Features
 
@@ -166,8 +128,55 @@ def calc_features_kline(symbol, interval):
   # Convert startTime to timestamp
   df_features['startTime'] = df_features['startTime'].astype('int64') // 10**6
 
+  return df_features
+
+def calc_features_kline(symbol, interval):
+  print(f'Calculate kline features')
+
+  # Load the Kline Data
+  df_features = load_data(f'data/kline/{symbol}/{interval}')
+
+  # Ensure numeric columns are properly cast
+  df_features['volume'] = df_features['volume'].astype(float)
+  df_features['turnover'] = df_features['turnover'].astype(float)
+
+  df_features = calc_features_kline_based(df_features)
+
   # Save the features to a CSV file
   save_features(df_features, 'features/kline', symbol, interval)
+
+def calc_features_index_price_kline(symbol, interval):
+  print(f'Calculate index price kline features')
+
+  # Load the Kline Data
+  df_features = load_data(f'data/index_price_kline/{symbol}/{interval}')
+
+  df_features = calc_features_kline_based(df_features)
+
+  # Save the features to a CSV file
+  save_features(df_features, 'features/index_price_kline', symbol, interval)
+
+def calc_features_mark_price_kline(symbol, interval):
+  print(f'Calculate mark price kline features')
+
+  # Load the Kline Data
+  df_features = load_data(f'data/mark_price_kline/{symbol}/{interval}')
+
+  df_features = calc_features_kline_based(df_features)
+
+  # Save the features to a CSV file
+  save_features(df_features, 'features/mark_price_kline', symbol, interval)
+
+def calc_features_premium_index_price_kline(symbol, interval):
+  print(f'Calculate premium index price kline features')
+
+  # Load the Kline Data
+  df_features = load_data(f'data/premium_index_price_kline/{symbol}/{interval}')
+
+  df_features = calc_features_kline_based(df_features)
+
+  # Save the features to a CSV file
+  save_features(df_features, 'features/premium_index_price_kline', symbol, interval)
 
 def calc_features_order_book(symbol):
   def process_order_book(file_path, top_n_levels=20):
@@ -277,6 +286,8 @@ def calc_features_order_book(symbol):
       # Convert to DataFrame
       return pd.DataFrame(features)
 
+  print(f'Calculate order book features')
+
   # Calc features
   file_path = f'data/order_book/2025-02-17_{symbol}_ob500.data'
   df_features = process_order_book(file_path)
@@ -323,10 +334,11 @@ def calc_features_order_book(symbol):
   df_features_agg['timestamp'] = df_features_agg['timestamp'].astype('int64') // 10**6
 
   # Save to CSV
-  save_features(df_features_agg, 'features/orderbook', symbol)
-  df_features_agg.to_csv('features/orderbook/features.csv', index=False)
+  save_features(df_features_agg, 'features/order_book', symbol)
 
 def calc_features_funding_rate(symbol):
+  print(f'Calculate funding rate features')
+
   df_features = load_data(f'data/funding_rate/{symbol}')
 
   # Convert fundingRateTimestamp to datetime format (assuming fundingRateTimestamp column exists)
@@ -363,7 +375,120 @@ def calc_features_funding_rate(symbol):
 
   save_features(df_features, 'features/funding_rate', symbol)
 
+def calc_features_long_short_ratio(symbol, period):
+  print(f'Calculate long short ratio features')
+
+  df_features = load_data(f'data/long_short_ratio/{symbol}/{period}')
+
+  # Convert timestamp to datetime
+  df_features['timestamp'] = pd.to_datetime(df_features['timestamp'], unit='ms')
+
+  # Ensure numeric columns are properly cast
+  df_features['buyRatio'] = df_features['buyRatio'].astype(float)
+  df_features['sellRatio'] = df_features['sellRatio'].astype(float)
+
+  # Features
+
+  # Calculate Net Long/Short Position
+  df_features['net_position'] = df_features['buyRatio'] - df_features['sellRatio']
+
+  # Calculate Long/Short Ratio
+  df_features['long_short_ratio'] = df_features['buyRatio'] / df_features['sellRatio']
+
+  # Rolling average over 15 minutes
+  df_features['buyRatio_rolling_avg_15min'] = df_features['buyRatio'].rolling(window=3).mean()
+  df_features['sellRatio_rolling_avg_15min'] = df_features['sellRatio'].rolling(window=3).mean()
+
+  df_features['buyRatio_rolling_avg_30min'] = df_features['buyRatio'].rolling(window=6).mean()
+  df_features['sellRatio_rolling_avg_30min'] = df_features['sellRatio'].rolling(window=6).mean()
+
+  # Rolling standard deviation over 15 minutes
+  df_features['buyRatio_rolling_std_15min'] = df_features['buyRatio'].rolling(window=3).std()
+  df_features['sellRatio_rolling_std_15min'] = df_features['sellRatio'].rolling(window=3).std()
+
+  df_features['buyRatio_rolling_std_30min'] = df_features['buyRatio'].rolling(window=6).std()
+  df_features['sellRatio_rolling_std_30min'] = df_features['sellRatio'].rolling(window=6).std()
+
+  # Rate of Change for buy and sell ratios
+  df_features['buyRatio_roc_5min'] = df_features['buyRatio'].pct_change(periods=1)
+  df_features['sellRatio_roc_5min'] = df_features['sellRatio'].pct_change(periods=1)
+
+  df_features['buyRatio_roc_15min'] = df_features['buyRatio'].pct_change(periods=3)
+  df_features['sellRatio_roc_15min'] = df_features['sellRatio'].pct_change(periods=3)
+
+  df_features['buyRatio_roc_30min'] = df_features['buyRatio'].pct_change(periods=6)
+  df_features['sellRatio_roc_30min'] = df_features['sellRatio'].pct_change(periods=6)
+
+  # Sentiment Classification: Bullish or Bearish
+  df_features['sentiment_class'] = np.where(df_features['net_position'] > 0, 1, -1)
+
+  # Sentiment Strength (absolute value of net position)
+  df_features['sentiment_strength'] = df_features['net_position'].abs()
+
+  # Add lag features (1-minute lag example)
+  df_features['buyRatio_lag_1'] = df_features['buyRatio'].shift(1)
+  df_features['sellRatio_lag_1'] = df_features['sellRatio'].shift(1)
+
+  # Extreme buy or sell ratio
+  df_features['extreme_buy_ratio'] = df_features['buyRatio'] > 0.9  # Threshold for extreme sentiment
+  df_features['extreme_sell_ratio'] = df_features['sellRatio'] > 0.9
+
+  # Convert startTime to timestamp
+  df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
+
+  save_features(df_features, 'features/long_short_ratio', symbol)
+
+def calc_features_open_interest(symbol, intervalTime):
+  print(f'Calculate open interest features')
+
+  df_features = load_data(f'data/open_interest/{symbol}/{intervalTime}')
+
+  # Convert timestamp to datetime
+  df_features['timestamp'] = pd.to_datetime(df_features['timestamp'], unit='ms')
+
+  # Ensure numeric columns are properly cast
+  df_features['openInterest'] = df_features['openInterest'].astype(float)
+
+  # Features
+
+  # Rolling averages and standard deviations
+  df_features['oi_rolling_avg_15min'] = df_features['openInterest'].rolling(window=3).mean()
+  df_features['oi_rolling_std_15min'] = df_features['openInterest'].rolling(window=3).std()
+
+  df_features['oi_rolling_avg_30min'] = df_features['openInterest'].rolling(window=6).mean()
+  df_features['oi_rolling_std_30min'] = df_features['openInterest'].rolling(window=6).std()
+
+  # Rate of change and percentage change
+  df_features['oi_pct_change_5min'] = df_features['openInterest'].pct_change(periods=1)
+  df_features['oi_rate_of_change_5min'] = df_features['openInterest'].diff()
+
+  # Cumulative Open Interest and Cumulative Percentage Change
+  df_features['cumulative_open_interest'] = df_features['openInterest'].cumsum()
+  df_features['cumulative_pct_change_oi_5min'] = df_features['oi_pct_change_5min'].cumsum()
+
+  # Momentum of Open Interest
+  df_features['oi_momentum_15min'] = df_features['oi_pct_change_5min'].rolling(window=3).mean()
+  df_features['oi_momentum_30min'] = df_features['oi_pct_change_5min'].rolling(window=6).mean()
+
+  # Sentiment of Open Interest (for example, positive if Open Interest is increasing)
+  df_features['oi_sentiment_5min'] = np.where(df_features['oi_pct_change_5min'] > 0, 1, -1)
+
+  # Convert startTime to timestamp
+  df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
+
+  save_features(df_features, f'features/open_interest/{intervalTime}', symbol)
+
 if __name__ == '__main__':
-  calc_features_kline('BTCUSDT', '1')
-  calc_features_order_book('BTCUSDT')
-  calc_features_funding_rate('BTCUSDT')
+  symbol = 'BTCUSDT'
+  interval = '1'  # Kline interval (1m, 5m, 15m, etc.)
+  period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
+  intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
+
+  calc_features_kline(symbol, interval)
+  calc_features_index_price_kline(symbol, interval)
+  calc_features_mark_price_kline(symbol, interval)
+  calc_features_premium_index_price_kline(symbol, interval)
+  calc_features_order_book(symbol)
+  calc_features_funding_rate(symbol)
+  calc_features_long_short_ratio(symbol, period_long_short_ratio)
+  calc_features_open_interest(symbol, intervalTime)

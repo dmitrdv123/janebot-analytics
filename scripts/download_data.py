@@ -129,7 +129,7 @@ def download_open_interest(symbol, intervalTime, start_time, end_time):
     df = pd.DataFrame(data, columns=['openInterest', 'timestamp'])
     df = df.sort_values('timestamp', ascending=True)
 
-    save_data(df, base_folder, symbol, start)
+    save_data(df, base_folder, symbol, start, intervalTime)
 
 # Function to download Index Price Kline
 def download_index_price_kline(symbol, interval, start_time, end_time):
