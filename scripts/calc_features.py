@@ -365,7 +365,7 @@ def calc_features_funding_rate(symbol):
   df_features['fundingRateROC'] = df_features['fundingRate'].pct_change()
 
   # Sentiment based on funding rate direction
-  df_features['sentiment'] = df_features['fundingRate'].apply(lambda x: 'long-biased' if x > 0 else 'short-biased')
+  df_features['sentiment'] = df_features['fundingRate'].apply(lambda x: '1' if x > 0 else '-1')
 
   # Lagged feature
   df_features['fundingRateLag1'] = df_features['fundingRate'].shift(1)
@@ -459,19 +459,19 @@ def calc_features_open_interest(symbol, intervalTime):
   df_features['oi_rolling_std_30min'] = df_features['openInterest'].rolling(window=6).std()
 
   # Rate of change and percentage change
-  df_features['oi_pct_change_5min'] = df_features['openInterest'].pct_change(periods=1)
+  df_features['oi_pct_change'] = df_features['openInterest'].pct_change()
   df_features['oi_rate_of_change_5min'] = df_features['openInterest'].diff()
 
   # Cumulative Open Interest and Cumulative Percentage Change
   df_features['cumulative_open_interest'] = df_features['openInterest'].cumsum()
-  df_features['cumulative_pct_change_oi_5min'] = df_features['oi_pct_change_5min'].cumsum()
+  df_features['cumulative_pct_change_oi'] = df_features['oi_pct_change'].cumsum()
 
   # Momentum of Open Interest
-  df_features['oi_momentum_15min'] = df_features['oi_pct_change_5min'].rolling(window=3).mean()
-  df_features['oi_momentum_30min'] = df_features['oi_pct_change_5min'].rolling(window=6).mean()
+  df_features['oi_momentum_15min'] = df_features['oi_pct_change'].rolling(window=3).mean()
+  df_features['oi_momentum_30min'] = df_features['oi_pct_change'].rolling(window=6).mean()
 
   # Sentiment of Open Interest (for example, positive if Open Interest is increasing)
-  df_features['oi_sentiment_5min'] = np.where(df_features['oi_pct_change_5min'] > 0, 1, -1)
+  df_features['oi_sentiment'] = np.where(df_features['oi_pct_change'] > 0, 1, -1)
 
   # Convert startTime to timestamp
   df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
@@ -560,7 +560,22 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
   max_timestamp = df_features_order_book['features_order_book_timestamp'].max()
   df_merged = df_merged[(df_merged['features_kline_startTime'] >= min_timestamp) & (df_merged['features_kline_startTime'] <= max_timestamp)]
 
-  save_features(df_merged, f'features/merged', symbol)
+  return df_merged
+
+def calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio):
+  df = merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio)
+  
+  # Open Interest to Price ratio
+  df['features_open_interest_oi_to_price_ratio'] = df['features_open_interest_openInterest'] / df['features_kline_closePrice']
+  
+  # Price vs Open Interest Divergence
+  df['features_open_interest_price_vs_oi_divergence'] = df['features_kline_closePrice'].pct_change() - df['features_open_interest_openInterest'].pct_change()
+  
+  # Calculate correlation between buyRatio and price over 5 minutes
+  df['features_long_short_ratio_corr_long_short_price_5min'] = df['features_long_short_ratio_buyRatio'].rolling(window=5).corr(df['features_kline_closePrice'])
+  df['features_long_short_ratio_corr_long_short_price_10min'] = df['features_long_short_ratio_buyRatio'].rolling(window=10).corr(df['features_kline_closePrice'])
+
+  save_features(df, f'features/merged', symbol)
 
 if __name__ == '__main__':
   symbol = 'BTCUSDT'
@@ -577,4 +592,4 @@ if __name__ == '__main__':
   calc_features_long_short_ratio(symbol, period_long_short_ratio)
   calc_features_open_interest(symbol, intervalTime)
 
-  merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio)
+  calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio)
