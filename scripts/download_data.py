@@ -151,7 +151,7 @@ def download_index_price_kline(symbol, interval, start_time, end_time):
       df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice'])
       df = df.sort_values('startTime', ascending=True)
 
-      save_data(df, base_folder, symbol, start)
+      save_data(df, base_folder, symbol, start, interval)
 
 # Function to download Mark Price Kline
 def download_mark_price_kline(symbol, interval, start_time, end_time):
@@ -173,7 +173,7 @@ def download_mark_price_kline(symbol, interval, start_time, end_time):
       df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice'])
       df = df.sort_values('startTime', ascending=True)
 
-      save_data(df, base_folder, symbol, start)
+      save_data(df, base_folder, symbol, start, interval)
 
 # Function to download Premium Index Price Kline
 def download_premium_index_price_kline(symbol, interval, start_time, end_time):
@@ -195,7 +195,7 @@ def download_premium_index_price_kline(symbol, interval, start_time, end_time):
       df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice'])
       df = df.sort_values('startTime', ascending=True)
 
-      save_data(df, base_folder, symbol, start)
+      save_data(df, base_folder, symbol, start, interval)
 
 # Example usage
 if __name__ == '__main__':
