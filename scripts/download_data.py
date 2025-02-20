@@ -21,8 +21,11 @@ def split_time_range(start_time, end_time, hours=1):
   return chunks
 
 # Function to save data per hour inside the correct date-based folder
-def save_data(df, base_folder, symbol, interval, start_time):
-  date_folder = f'{base_folder}/{symbol}/{interval}/{start_time.strftime("%Y-%m-%d")}'
+def save_data(df, base_folder, symbol, start_time, interval=None):
+  if interval:
+    date_folder = f'{base_folder}/{symbol}/{interval}/{start_time.strftime("%Y-%m-%d")}'
+  else:
+    date_folder = f'{base_folder}/{symbol}/{start_time.strftime("%Y-%m-%d")}'
   ensure_directory(date_folder)
   filename = f'{date_folder}/{start_time.strftime("%H")}.csv'
   df.to_csv(filename, index=False)
@@ -48,7 +51,7 @@ def download_kline(symbol, interval, start_time, end_time):
       df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover'])
       df = df.sort_values('startTime', ascending=True)
 
-      save_data(df, base_folder, symbol, interval, start)
+      save_data(df, base_folder, symbol, start, interval)
 
 # Function to download Funding Rate history
 def download_funding_rate(symbol, start_time, end_time):
@@ -69,7 +72,7 @@ def download_funding_rate(symbol, start_time, end_time):
       df = pd.DataFrame(data, columns=['symbol', 'fundingRate', 'fundingRateTimestamp'])
       df = df.sort_values('fundingRateTimestamp', ascending=True)
 
-      save_data(df, base_folder, symbol, 'funding_rate', start)
+      save_data(df, base_folder, symbol, start)
 
 # Function to download Long/Short Ratio
 def download_long_short_ratio(symbol, period, start_time, end_time):
@@ -99,7 +102,7 @@ def download_long_short_ratio(symbol, period, start_time, end_time):
     df = pd.DataFrame(data, columns=['symbol', 'buyRatio', 'sellRatio', 'timestamp'])
     df = df.sort_values('timestamp', ascending=True)
 
-    save_data(df, base_folder, symbol, period, start)
+    save_data(df, base_folder, symbol, start, period)
 
 # Function to download Open Interest
 def download_open_interest(symbol, intervalTime, start_time, end_time):
@@ -129,7 +132,7 @@ def download_open_interest(symbol, intervalTime, start_time, end_time):
     df = pd.DataFrame(data, columns=['openInterest', 'timestamp'])
     df = df.sort_values('timestamp', ascending=True)
 
-    save_data(df, base_folder, symbol, 'open_interest', start)
+    save_data(df, base_folder, symbol, start)
 
 # Function to download Index Price Kline
 def download_index_price_kline(symbol, interval, start_time, end_time):
@@ -151,7 +154,7 @@ def download_index_price_kline(symbol, interval, start_time, end_time):
       df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice'])
       df = df.sort_values('startTime', ascending=True)
 
-      save_data(df, base_folder, symbol, 'index_price_kline', start)
+      save_data(df, base_folder, symbol, start)
 
 # Function to download Mark Price Kline
 def download_mark_price_kline(symbol, interval, start_time, end_time):
@@ -173,7 +176,7 @@ def download_mark_price_kline(symbol, interval, start_time, end_time):
       df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice'])
       df = df.sort_values('startTime', ascending=True)
 
-      save_data(df, base_folder, symbol, 'mark_price_kline', start)
+      save_data(df, base_folder, symbol, start)
 
 # Function to download Premium Index Price Kline
 def download_premium_index_price_kline(symbol, interval, start_time, end_time):
@@ -195,7 +198,7 @@ def download_premium_index_price_kline(symbol, interval, start_time, end_time):
       df = pd.DataFrame(data, columns=['startTime', 'openPrice', 'highPrice', 'lowPrice', 'closePrice'])
       df = df.sort_values('startTime', ascending=True)
 
-      save_data(df, base_folder, symbol, 'premium_index_price_kline', start)
+      save_data(df, base_folder, symbol, start)
 
 # Example usage
 if __name__ == '__main__':
