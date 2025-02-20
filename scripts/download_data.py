@@ -3,13 +3,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 from pybit.unified_trading import HTTP
 
+from utils import ensure_directory
+
 # Initialize Bybit API (No authentication needed for public data)
 session = HTTP()
-
-# Create a function to ensure directories exist
-def ensure_directory(directory):
-  if not os.path.exists(directory):
-    os.makedirs(directory)
 
 # Function to split time range into 1-hour chunks
 def split_time_range(start_time, end_time, hours=1):
