@@ -436,7 +436,7 @@ def calc_features_long_short_ratio(symbol, period):
   # Convert startTime to timestamp
   df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
 
-  save_features(df_features, 'features/long_short_ratio', symbol)
+  save_features(df_features, f'features/long_short_ratio', symbol, period)
 
 def calc_features_open_interest(symbol, intervalTime):
   print(f'Calculate open interest features')
@@ -476,13 +476,97 @@ def calc_features_open_interest(symbol, intervalTime):
   # Convert startTime to timestamp
   df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
 
-  save_features(df_features, f'features/open_interest/{intervalTime}', symbol)
+  save_features(df_features, f'features/open_interest', symbol, intervalTime)
+
+def merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio):
+  df_features_kline = pd.read_csv(f'features/kline/{symbol}/{interval}/features.csv')
+  df_features_mark_price_kline = pd.read_csv(f'features/mark_price_kline/{symbol}/{interval}/features.csv')
+  df_features_index_price_kline = pd.read_csv(f'features/index_price_kline/{symbol}/{interval}/features.csv')
+  df_features_premium_index_price_kline = pd.read_csv(f'features/premium_index_price_kline/{symbol}/{interval}/features.csv')
+  
+  df_features_funding_rate = pd.read_csv(f'features/funding_rate/{symbol}/features.csv')
+  df_features_long_short_ratio = pd.read_csv(f'features/long_short_ratio/{symbol}/{period_long_short_ratio}/features.csv')
+  df_features_open_interest = pd.read_csv(f'features/open_interest/{symbol}/{intervalTime}/features.csv')
+  df_features_order_book = pd.read_csv(f'features/order_book/{symbol}/features.csv')
+  
+  df_features_kline = df_features_kline.add_prefix('features_kline_')
+  df_features_mark_price_kline = df_features_mark_price_kline.add_prefix('features_mark_price_kline_')
+  df_features_index_price_kline = df_features_index_price_kline.add_prefix('features_index_price_kline_')
+  df_features_premium_index_price_kline = df_features_premium_index_price_kline.add_prefix('features_premium_index_price_kline_')
+
+  df_features_funding_rate = df_features_funding_rate.add_prefix('features_funding_rate_')
+  df_features_long_short_ratio = df_features_long_short_ratio.add_prefix('features_long_short_ratio_')
+  df_features_open_interest = df_features_open_interest.add_prefix('features_open_interest_')
+  df_features_order_book = df_features_order_book.add_prefix('features_order_book_')
+  
+  df_merged = pd.merge_asof(
+    df_features_kline.sort_values('features_kline_startTime'),
+    df_features_mark_price_kline.sort_values('features_mark_price_kline_startTime'),
+    left_on='features_kline_startTime',
+    right_on='features_mark_price_kline_startTime',
+    direction='backward'
+  )
+  
+  df_merged = pd.merge_asof(
+    df_merged.sort_values('features_kline_startTime'),
+    df_features_index_price_kline.sort_values('features_index_price_kline_startTime'),
+    left_on='features_kline_startTime',
+    right_on='features_index_price_kline_startTime',
+    direction='backward'
+  )
+  
+  df_merged = pd.merge_asof(
+    df_merged.sort_values('features_kline_startTime'),
+    df_features_premium_index_price_kline.sort_values('features_premium_index_price_kline_startTime'),
+    left_on='features_kline_startTime',
+    right_on='features_premium_index_price_kline_startTime',
+    direction='backward'
+  )
+  
+  df_merged = pd.merge_asof(
+    df_merged.sort_values('features_kline_startTime'),
+    df_features_funding_rate.sort_values('features_funding_rate_fundingRateTimestamp'),
+    left_on='features_kline_startTime',
+    right_on='features_funding_rate_fundingRateTimestamp',
+    direction='backward'
+  )
+  
+  df_merged = pd.merge_asof(
+    df_merged.sort_values('features_kline_startTime'),
+    df_features_long_short_ratio.sort_values('features_long_short_ratio_timestamp'),
+    left_on='features_kline_startTime',
+    right_on='features_long_short_ratio_timestamp',
+    direction='backward'
+  )
+  
+  df_merged = pd.merge_asof(
+    df_merged.sort_values('features_kline_startTime'),
+    df_features_open_interest.sort_values('features_open_interest_timestamp'),
+    left_on='features_kline_startTime',
+    right_on='features_open_interest_timestamp',
+    direction='backward'
+  )
+  
+  df_merged = pd.merge_asof(
+    df_merged.sort_values('features_kline_startTime'),
+    df_features_order_book.sort_values('features_order_book_timestamp'),
+    left_on='features_kline_startTime',
+    right_on='features_order_book_timestamp',
+    direction='backward'
+  )
+  
+  # Filter by order book interval
+  min_timestamp = df_features_order_book['features_order_book_timestamp'].min()
+  max_timestamp = df_features_order_book['features_order_book_timestamp'].max()
+  df_merged = df_merged[(df_merged['features_kline_startTime'] >= min_timestamp) & (df_merged['features_kline_startTime'] <= max_timestamp)]
+
+  save_features(df_merged, f'features/merged', symbol)
 
 if __name__ == '__main__':
   symbol = 'BTCUSDT'
   interval = '1'  # Kline interval (1m, 5m, 15m, etc.)
-  period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
   intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
+  period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
 
   calc_features_kline(symbol, interval)
   calc_features_index_price_kline(symbol, interval)
@@ -492,3 +576,5 @@ if __name__ == '__main__':
   calc_features_funding_rate(symbol)
   calc_features_long_short_ratio(symbol, period_long_short_ratio)
   calc_features_open_interest(symbol, intervalTime)
+
+  merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio)
