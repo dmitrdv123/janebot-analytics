@@ -7,3 +7,8 @@ matplotlib
 seaborn 
 jupyterlab
 python-dotenv
+shap
+pytorch-lightning 
+pytorch-forecasting 
+torch 
+joblib 
