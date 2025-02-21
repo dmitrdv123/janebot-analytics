@@ -93,10 +93,13 @@ if __name__ == '__main__':
   # Train-Test Split (80% training, 20% testing)
   X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
-  # Define TensorFlow model
+  # Reshape data for LSTM (samples, time steps, features)
+  X_train = X_train.reshape(X_train.shape[0], 1, X_train.shape[1])
+  X_test = X_test.reshape(X_test.shape[0], 1, X_test.shape[1])
+
+  # Define LSTM model
   model = tf.keras.Sequential([
-    tf.keras.layers.InputLayer(input_shape=(X_train.shape[1],)),
-    tf.keras.layers.Dense(128, kernel_regularizer=tf.keras.regularizers.l2(0.01)),
+    tf.keras.layers.LSTM(128, activation='tanh', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=False),
     tf.keras.layers.LeakyReLU(),
     tf.keras.layers.Dense(64, kernel_regularizer=tf.keras.regularizers.l2(0.01)),
     tf.keras.layers.LeakyReLU(),
@@ -138,7 +141,7 @@ if __name__ == '__main__':
   plt.show()
 
   # Save the model and the scaler
-  model.save('models/model_kline.keras')
+  model.save('models/model_kline_lstm.keras')
   print('Model has been saved.')
 
   # Save the feature and target scalers
