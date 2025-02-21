@@ -1,3 +1,4 @@
+import joblib
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
@@ -135,3 +136,16 @@ if __name__ == '__main__':
   plt.title("Actual vs. Predicted Relative Price Change")
   plt.legend()
   plt.show()
+
+  # Save the model and the scaler
+  model.save('models/model_kline.keras')
+  print('Model has been saved.')
+
+  # Save the feature and target scalers
+  joblib.dump(scalers['price'], 'models/model_kline_scaler_price.pkl')
+  joblib.dump(scalers['price_change'], 'models/model_kline_scaler_price_change.pkl')
+  joblib.dump(scalers['volume'], 'models/model_kline_scaler_volume.pkl')
+  joblib.dump(scalers['turnover'], 'models/model_kline_scaler_turnover.pkl')
+  joblib.dump(scalers['returns'], 'models/model_kline_scaler_returns.pkl')
+  joblib.dump(scalers['range'], 'models/model_kline_scaler_range.pkl')
+  print('Scalers have been saved.')
