@@ -9,9 +9,10 @@ import tensorflow as tf
 
 if __name__ == '__main__':
   symbol = 'BTCUSDT'
+  folder = f'features/kline/{symbol}/1'
 
-  df = pd.read_csv(f'features/kline/{symbol}/1/features.csv')
-   
+  df = pd.read_csv(f'{folder}/features.csv')
+
   # Define columns for scale 
   price_columns = ['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'SMA_5', 'SMA_10', 'EMA_5', 'EMA_10']
   price_change_column = ['priceChange']
@@ -20,7 +21,7 @@ if __name__ == '__main__':
   returns_columns = ['logReturn', 'stdReturn_5m', 'stdReturn_10m', 'MACD_line', 'MACD_signal', 'MACD_histogram', 
                    'Stochastic_K', 'Stochastic_D', 'ROC_14', 'RSI_14']
   range_columns = ['highLowRange']
-  
+
   # Initialize scalers
   scalers = {
     'price': MinMaxScaler(),
@@ -30,26 +31,33 @@ if __name__ == '__main__':
     'returns': StandardScaler(),
     'range': MinMaxScaler()
   }
-  
+
   # Apply different scalers
   df[price_columns] = scalers['price'].fit_transform(df[price_columns])
   df[price_change_column] = scalers['price_change'].fit_transform(df[price_change_column])
   df[volume_columns] = scalers['volume'].fit_transform(df[volume_columns])
   df[returns_columns] = scalers['returns'].fit_transform(df[returns_columns])
   df[range_columns] = scalers['range'].fit_transform(df[range_columns])
-   
+
   # Apply log transformation to turnover before scaling
   df[turnover_column] = np.log1p(df[turnover_column])  # log1p to avoid log(0) issues
   df[turnover_column] = scalers['turnover'].fit_transform(df[turnover_column])
+
+  # Apply scale to categorical features
+  df['hourOfDay'] = df['hourOfDay'] / 23  # Normalize to [0,1]
+  df['dayOfWeek'] = df['dayOfWeek'] / 6    # Normalize to [0,1] (0=Monday, 6=Sunday)
+  df['weekOfYear'] = df['weekOfYear'] / 51 # Normalize to [0,1]
+  df['monthOfYear'] = df['monthOfYear'] / 11 # Normalize to [0,1] (0=Jan, 11=Dec)
+  df['minuteOfHour'] = df['minuteOfHour'] / 59 # Normalize to [0,1]
 
   # Define model output  
   df['futureRelativePriceChange'] = df['relativePriceChange'].shift(-1)
   df['futurePriceChange'] = df['priceChange'].shift(-1)
   df['futureClosePrice'] = df['closePrice'].shift(-1)
-  
+
   # Drop NaN values (last row will be NaN after shifting)
   df.dropna(inplace=True)
-  
+
   # Define feature columns
   feature_columns = [
     'openPrice', 
@@ -82,14 +90,14 @@ if __name__ == '__main__':
     'Stochastic_D', 
     'ROC_14',
   ]
-  
+
   # Target variable (future relative price change)
   target_column = 'futureClosePrice'
-  
+
   # Prepare input and output data
   X = df[feature_columns].values  # Features
   y = df[target_column].values    # Target (future relative price change)
-  
+
   # Train-Test Split (80% training, 20% testing)
   X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
@@ -139,6 +147,10 @@ if __name__ == '__main__':
   plt.title("Actual vs. Predicted Relative Price Change")
   plt.legend()
   plt.show()
+
+  # Save scaled dataset
+  df.to_csv(f'{folder}/features_scaled.csv')
+  print('Scaled dataset have been saved.')
 
   # Save the model and the scaler
   model.save('models/model_kline_lstm.keras')
