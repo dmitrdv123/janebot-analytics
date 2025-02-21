@@ -71,6 +71,9 @@ def calc_features_kline_based(df_features):
   # 1.1. Price Change (Difference between last close and previous close)
   df_features['priceChange'] = df_features['closePrice'].diff()
 
+  # 1.1.1 Relative price change (percentage change)
+  df_features["relativePriceChange"] = df_features["closePrice"].pct_change()
+
   # 1.2. Log Return
   df_features['logReturn'] = np.log(df_features['closePrice'] / df_features['closePrice'].shift(1))
 
