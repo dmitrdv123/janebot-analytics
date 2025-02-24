@@ -249,7 +249,7 @@ def calc_features_order_book(symbol):
                   cumulative_delta_volume += delta_volume
 
                   # Liquidity Pressure Ratio (LPR)
-                  liquidity_pressure_ratio = total_best_bid_volume / total_best_ask_volume if total_best_ask_volume > 0 else np.inf
+                  liquidity_pressure_ratio = np.log1p(total_best_bid_volume) - np.log1p(total_best_ask_volume)
 
                   # Mean & Std of Order Sizes
                   ask_sizes = [qty for _, qty in asks[:top_n_levels]]

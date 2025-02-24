@@ -7,7 +7,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
-def prepare_feature_kline(df):
+def prepare_features_kline(df):
   # Define columns for scale 
   price_columns = ['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'SMA_5', 'SMA_10', 'EMA_5', 'EMA_10']
   price_change_column = ['priceChange']
@@ -55,14 +55,74 @@ def prepare_feature_kline(df):
 
   return df, scalers
 
+def prepare_features_order_book(df):
+  # Define columns for scale 
+  columns_price = ['mid_price_mean', 'mid_price_min', 'mid_price_max', 'mid_price_last', 'vwap_ask_mean', 'vwap_bid_mean', 'vwap_total_mean']
+  columns_price_std = ['mid_price_std']
+  columns_spread = ['spread_mean', 'spread_std']
+  columns_spread_max = ['spread_max']
+  columns_spread_relative = ['relative_spread_mean', 'relative_spread_std']
+  columns_volume = ['total_best_ask_volume_mean', 'total_best_ask_volume_std', 'total_best_bid_volume_mean', 'total_best_bid_volume_std']
+  columns_volume_max = ['total_best_ask_volume_max', 'total_best_bid_volume_max']
+  columns_volume_sum = ['total_best_ask_volume_sum', 'total_best_bid_volume_sum', 'total_best_bid_volume_max']
+  columns_volume_cumulative = ['cumulative_delta_volume_last']
+  columns_volume_ratio = ['order_book_imbalance_mean', 'order_book_imbalance_std', 'volume_imbalance_ratio_mean', 'volume_imbalance_ratio_std', 'mean_ask_size_mean', 'mean_ask_size_std', 'mean_bid_size_mean', 'mean_bid_size_std', 'std_ask_size_mean', 'std_bid_size_mean']
+  columns_market_depth = ['market_depth_ask_mean', 'market_depth_ask_std', 'market_depth_bid_mean', 'market_depth_bid_std']
+  columns_liquidity = ['liquidity_pressure_ratio_mean', 'liquidity_pressure_ratio_std']
+  columns_volatility = ['realized_volatility']
+  
+  # Initialize scalers
+  scalers = {
+    'price': MinMaxScaler(),
+    'price_std': StandardScaler(),
+    'spread': StandardScaler(),
+    'spread_max': RobustScaler(),
+    'spread_relative': StandardScaler(),
+    'volume': RobustScaler(),# TODO
+    'volume_max': RobustScaler(),
+    'volume_sum': StandardScaler(),# TODO
+    'volume_ratio': StandardScaler(),
+    'volume_cumulative': StandardScaler(),
+    'market_depth': StandardScaler(),# TODO
+    'liquidity': StandardScaler(),
+    'volatility': StandardScaler(),# TODO
+  }
+  
+  # Apply different scalers
+  df[columns_price] = scalers['price'].fit_transform(df[columns_price])
+  df[columns_price_std] = scalers['price_std'].fit_transform(df[columns_price_std])
+  df[columns_spread] = scalers['spread'].fit_transform(df[columns_spread])
+  df[columns_spread_max] = scalers['spread_max'].fit_transform(df[columns_spread_max])
+  df[columns_spread_relative] = scalers['spread_relative'].fit_transform(df[columns_spread_relative])
+  df[columns_volume_max] = scalers['volume_max'].fit_transform(df[columns_volume_max])
+  df[columns_volume_ratio] = scalers['volume_ratio'].fit_transform(df[columns_volume_ratio])
+  df[columns_volume_cumulative] = scalers['volume_cumulative'].fit_transform(df[columns_volume_cumulative])
+  df[columns_liquidity] = scalers['liquidity'].fit_transform(df[columns_liquidity])
+  
+  # Apply log transformation to turnover before scaling
+  df[columns_volume] = np.log1p(df[columns_volume])  # log1p to avoid log(0) issues
+  df[columns_volume_sum] = np.log1p(df[columns_volume_sum])  # log1p to avoid log(0) issues
+  df[columns_market_depth] = np.log1p(df[columns_market_depth])  # log1p to avoid log(0) issues
+  df[columns_volatility] = np.log1p(df[columns_volatility])  # log1p to avoid log(0) issues
+  
+  df[columns_volume] = scalers['volume'].fit_transform(df[columns_volume])
+  df[columns_volume_sum] = scalers['volume_sum'].fit_transform(df[columns_volume_sum])
+  df[columns_market_depth] = scalers['market_depth'].fit_transform(df[columns_market_depth])
+  df[columns_volatility] = scalers['volatility'].fit_transform(df[columns_volatility])
+  
+  return df, scalers
+
 if __name__ == '__main__':
   symbol = 'BTCUSDT'
   folder_features_kline = f'features/kline/{symbol}/1'
+  folder_features_order_book = f'features/order_book/{symbol}'
 
   df_features_kline = pd.read_csv(f'{folder_features_kline}/features.csv')
+  df_features_order_book = pd.read_csv(f'{folder_features_order_book}/features.csv')
 
   # Prepare features
-  df_features_kline_scaled, scalers_features_kline = prepare_feature_kline(df_features_kline)
+  df_features_kline_scaled, scalers_features_kline = prepare_features_kline(df_features_kline)
+  df_features_order_book_scaled, scalers_features_order_book = prepare_features_order_book(df_features_order_book)
 
   # Define feature columns
   input_columns = [
@@ -101,8 +161,8 @@ if __name__ == '__main__':
   target_column = 'futureClosePrice'
 
   # Prepare input and output data
-  X = df_features_kline_scaled[input_columns].values  # Features
-  y = df_features_kline_scaled[target_column].values    # Target (future relative price change)
+  X = df_features_kline_scaled[input_columns].values # Features
+  y = df_features_kline_scaled[target_column].values # Target (future relative price change)
 
   # Train-Test Split (80% training, 20% testing)
   X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
@@ -156,6 +216,7 @@ if __name__ == '__main__':
 
   # Save scaled dataset
   df_features_kline_scaled.to_csv(f'{folder_features_kline}/features_scaled.csv')
+  df_features_order_book_scaled.to_csv(f'{folder_features_order_book}/features_scaled.csv')
   print('Scaled dataset have been saved.')
 
   # Save the model and the scaler
@@ -165,4 +226,6 @@ if __name__ == '__main__':
   # Save the feature and target scalers
   for scaler_name, scaler in scalers_features_kline.items():
     joblib.dump(scaler, f'models/model_kline_scaler_{scaler_name}.pkl')
+  for scaler_name, scaler in scalers_features_order_book.items():
+    joblib.dump(scaler, f'models/model_order_book_scaler_{scaler_name}.pkl')
   print('Scalers have been saved.')
