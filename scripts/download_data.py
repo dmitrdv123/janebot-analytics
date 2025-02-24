@@ -204,8 +204,8 @@ if __name__ == '__main__':
   interval = '1'  # Kline interval (1m, 5m, 15m, etc.)
   period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
   intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
-  start_time = datetime(2025, 2, 16)
-  end_time = datetime(2025, 2, 18)
+  start_time = datetime(2025, 2, 20)
+  end_time = datetime(2025, 2, 24)
 
   download_kline(symbol, interval, start_time, end_time)
   download_funding_rate(symbol, start_time, end_time)

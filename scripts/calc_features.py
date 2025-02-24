@@ -149,7 +149,7 @@ def calc_features_kline(symbol, interval):
   df_features = calc_features_kline_based(df_features)
   
   # Order by timestamp ascending
-  df_features_agg = df_features_agg.sort_values(by='timestamp')
+  df_features = df_features.sort_values(by='startTime')
 
   # Save the features to a CSV file
   save_features(df_features, 'features/kline', symbol, interval)
@@ -297,9 +297,18 @@ def calc_features_order_book(symbol):
 
   print(f'Calculate order book features')
 
-  # Calc features
-  file_path = f'data/order_book/2025-02-17_{symbol}_ob500.data'
-  df_features = process_order_book(file_path)
+  all_features = []
+
+  # Iterate over all files in the order book directory
+  order_book_dir = f'data/order_book/{symbol}'
+  for filename in os.listdir(order_book_dir):
+      file_path = os.path.join(order_book_dir, filename)
+      if os.path.isfile(file_path):
+          df_features = process_order_book(file_path)
+          all_features.append(df_features)
+
+  # Combine all features into a single DataFrame
+  df_features = pd.concat(all_features, ignore_index=True)
 
   # Convert timestamp to datetime
   df_features['timestamp'] = pd.to_datetime(df_features['timestamp'], unit='ms')  # Assuming milliseconds
