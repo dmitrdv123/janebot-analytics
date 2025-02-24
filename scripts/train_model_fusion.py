@@ -254,29 +254,38 @@ if __name__ == '__main__':
 
   # Define LSTM model for Kline
   input_kline = tf.keras.layers.Input(shape=(1, X_kline_train.shape[2]))
-  layer_kline = tf.keras.layers.LSTM(128, activation='tanh', return_sequences=False)(input_kline)
-  layer_kline = tf.keras.layers.Dense(64, activation='relu')(layer_kline)
-  
-  # Define CNN model for Order Book
+  layer_kline = tf.keras.layers.LSTM(256, activation='tanh', return_sequences=True)(input_kline)  # More units + return_sequences=True
+  layer_kline = tf.keras.layers.LSTM(128, activation='tanh', return_sequences=False)(layer_kline)  # Additional LSTM layer
+
+  # Define CNN model for Order Book with more filters
   input_orderbook = tf.keras.layers.Input(shape=(X_orderbook_train.shape[1], 1))
-  order_book_layer = tf.keras.layers.Conv1D(128, kernel_size=3, activation='relu')(input_orderbook)
-  order_book_layer = tf.keras.layers.MaxPooling1D(pool_size=2)(order_book_layer)
-  order_book_layer = tf.keras.layers.Flatten()(order_book_layer)
-  order_book_layer = tf.keras.layers.Dense(64, activation='relu')(order_book_layer)
-  
+  layer_order_book = tf.keras.layers.Conv1D(256, kernel_size=3, activation='relu')(input_orderbook)
+  layer_order_book = tf.keras.layers.MaxPooling1D(pool_size=2)(layer_order_book)
+  layer_order_book = tf.keras.layers.Flatten()(layer_order_book)
+  layer_order_book = tf.keras.layers.Dense(128, activation='relu')(layer_order_book)
+
   # Merge LSTM and CNN
-  merged = tf.keras.layers.concatenate([layer_kline, order_book_layer])
-  merged = tf.keras.layers.Dense(32, activation='relu')(merged)
+  merged = tf.keras.layers.concatenate([layer_kline, layer_order_book])
+  merged = tf.keras.layers.Dense(128, activation='relu')(merged)  # Added Dense layer with more units
   output = tf.keras.layers.Dense(1)(merged)
-  
+
   # Define model
   optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
   model = tf.keras.Model(inputs=[input_kline, input_orderbook], outputs=output)
   model.compile(optimizer=optimizer, loss='mean_squared_error')
 
   # Train model
+  lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1)
   early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
-  model.fit([X_kline_train, X_orderbook_train], y_train, epochs=1000, batch_size=32, validation_data=([X_kline_test, X_orderbook_test], y_test), verbose=1, callbacks=[early_stopping])
+  model.fit(
+    [X_kline_train, X_orderbook_train], 
+    y_train, 
+    epochs=1000, 
+    batch_size=32, 
+    validation_data=([X_kline_test, X_orderbook_test], y_test), 
+    verbose=1, 
+    callbacks=[early_stopping, lr_scheduler]
+  )
 
   # Predictions
   y_pred = model.predict([X_kline_test, X_orderbook_test])
