@@ -7,19 +7,14 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 import tensorflow as tf
 
-if __name__ == '__main__':
-  symbol = 'BTCUSDT'
-  folder = f'features/kline/{symbol}/1'
-
-  df = pd.read_csv(f'{folder}/features.csv')
-
+def prepare_features(df):
   # Define columns for scale 
   price_columns = ['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'SMA_5', 'SMA_10', 'EMA_5', 'EMA_10']
   price_change_column = ['priceChange']
   volume_columns = ['volume']
   turnover_column = ['turnover']
   returns_columns = ['logReturn', 'stdReturn_5m', 'stdReturn_10m', 'MACD_line', 'MACD_signal', 'MACD_histogram', 
-                   'Stochastic_K', 'Stochastic_D', 'ROC_14', 'RSI_14']
+             'Stochastic_K', 'Stochastic_D', 'ROC_14', 'RSI_14']
   range_columns = ['highLowRange']
 
   # Initialize scalers
@@ -58,6 +53,17 @@ if __name__ == '__main__':
   # Drop NaN values (last row will be NaN after shifting)
   df.dropna(inplace=True)
 
+  return df, scalers
+
+if __name__ == '__main__':
+  symbol = 'BTCUSDT'
+  folder_feature_kline = f'features/kline/{symbol}/1'
+
+  df_feature_kline = pd.read_csv(f'{folder_feature_kline}/features.csv')
+
+  # Prepare features
+  df_feature_kline_scaled, scalers_feature_kline = prepare_features(df_feature_kline)
+
   # Define feature columns
   feature_columns = [
     'openPrice', 
@@ -95,8 +101,8 @@ if __name__ == '__main__':
   target_column = 'futureClosePrice'
 
   # Prepare input and output data
-  X = df[feature_columns].values  # Features
-  y = df[target_column].values    # Target (future relative price change)
+  X = df_feature_kline_scaled[feature_columns].values  # Features
+  y = df_feature_kline_scaled[target_column].values    # Target (future relative price change)
 
   # Train-Test Split (80% training, 20% testing)
   X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
@@ -149,7 +155,7 @@ if __name__ == '__main__':
   plt.show()
 
   # Save scaled dataset
-  df.to_csv(f'{folder}/features_scaled.csv')
+  df_feature_kline_scaled.to_csv(f'{folder_feature_kline}/features_scaled.csv')
   print('Scaled dataset have been saved.')
 
   # Save the model and the scaler
@@ -157,10 +163,6 @@ if __name__ == '__main__':
   print('Model has been saved.')
 
   # Save the feature and target scalers
-  joblib.dump(scalers['price'], 'models/model_kline_scaler_price.pkl')
-  joblib.dump(scalers['price_change'], 'models/model_kline_scaler_price_change.pkl')
-  joblib.dump(scalers['volume'], 'models/model_kline_scaler_volume.pkl')
-  joblib.dump(scalers['turnover'], 'models/model_kline_scaler_turnover.pkl')
-  joblib.dump(scalers['returns'], 'models/model_kline_scaler_returns.pkl')
-  joblib.dump(scalers['range'], 'models/model_kline_scaler_range.pkl')
+  for scaler_name, scaler in scalers_feature_kline.items():
+    joblib.dump(scaler, f'models/model_kline_scaler_{scaler_name}.pkl')
   print('Scalers have been saved.')
