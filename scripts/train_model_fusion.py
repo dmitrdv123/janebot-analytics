@@ -284,7 +284,7 @@ if __name__ == '__main__':
     batch_size=32, 
     validation_data=([X_kline_test, X_orderbook_test], y_test), 
     verbose=1, 
-    callbacks=[early_stopping, lr_scheduler]
+    callbacks=[lr_scheduler, early_stopping]
   )
 
   # Predictions
