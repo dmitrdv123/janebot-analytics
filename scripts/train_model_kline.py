@@ -1,13 +1,13 @@
 import joblib
-from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
+import tensorflow as tf
+from matplotlib import pyplot as plt
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
-import tensorflow as tf
 
-def prepare_features(df):
+def prepare_feature_kline(df):
   # Define columns for scale 
   price_columns = ['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'SMA_5', 'SMA_10', 'EMA_5', 'EMA_10']
   price_change_column = ['priceChange']
@@ -57,15 +57,15 @@ def prepare_features(df):
 
 if __name__ == '__main__':
   symbol = 'BTCUSDT'
-  folder_feature_kline = f'features/kline/{symbol}/1'
+  folder_features_kline = f'features/kline/{symbol}/1'
 
-  df_feature_kline = pd.read_csv(f'{folder_feature_kline}/features.csv')
+  df_features_kline = pd.read_csv(f'{folder_features_kline}/features.csv')
 
   # Prepare features
-  df_feature_kline_scaled, scalers_feature_kline = prepare_features(df_feature_kline)
+  df_features_kline_scaled, scalers_features_kline = prepare_feature_kline(df_features_kline)
 
   # Define feature columns
-  feature_columns = [
+  input_columns = [
     'openPrice', 
     'highPrice', 
     'lowPrice', 
@@ -101,8 +101,8 @@ if __name__ == '__main__':
   target_column = 'futureClosePrice'
 
   # Prepare input and output data
-  X = df_feature_kline_scaled[feature_columns].values  # Features
-  y = df_feature_kline_scaled[target_column].values    # Target (future relative price change)
+  X = df_features_kline_scaled[input_columns].values  # Features
+  y = df_features_kline_scaled[target_column].values    # Target (future relative price change)
 
   # Train-Test Split (80% training, 20% testing)
   X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
@@ -155,7 +155,7 @@ if __name__ == '__main__':
   plt.show()
 
   # Save scaled dataset
-  df_feature_kline_scaled.to_csv(f'{folder_feature_kline}/features_scaled.csv')
+  df_features_kline_scaled.to_csv(f'{folder_features_kline}/features_scaled.csv')
   print('Scaled dataset have been saved.')
 
   # Save the model and the scaler
@@ -163,6 +163,6 @@ if __name__ == '__main__':
   print('Model has been saved.')
 
   # Save the feature and target scalers
-  for scaler_name, scaler in scalers_feature_kline.items():
+  for scaler_name, scaler in scalers_features_kline.items():
     joblib.dump(scaler, f'models/model_kline_scaler_{scaler_name}.pkl')
   print('Scalers have been saved.')
