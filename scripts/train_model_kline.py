@@ -118,6 +118,9 @@ if __name__ == '__main__':
 
   df_features_kline = pd.read_csv(f'{folder_features_kline}/features.csv')
 
+  # Order by timestamp ascending
+  df_features_kline = df_features_kline.sort_values(by='startTime')
+
   # Prepare features
   df_features_kline_scaled, scalers_features_kline = prepare_features_kline(df_features_kline)
 
@@ -169,15 +172,17 @@ if __name__ == '__main__':
   X_test = X_test.reshape(X_test.shape[0], 1, X_test.shape[1])
 
   # Define LSTM model
-  model = tf.keras.Sequential([
-    tf.keras.layers.LSTM(128, activation='tanh', input_shape=(X_train.shape[1], X_train.shape[2]), return_sequences=False),
-    tf.keras.layers.LeakyReLU(),
-    tf.keras.layers.Dense(64, kernel_regularizer=tf.keras.regularizers.l2(0.01)),
-    tf.keras.layers.LeakyReLU(),
-    tf.keras.layers.Dense(32, kernel_regularizer=tf.keras.regularizers.l2(0.01)),
-    tf.keras.layers.LeakyReLU(),
-    tf.keras.layers.Dense(1)
-  ])
+  input_layer = tf.keras.layers.Input(shape=(X_train.shape[1], X_train.shape[2]))
+  layer = tf.keras.layers.LSTM(128, activation='tanh', return_sequences=False)(input_layer)
+  layer = tf.keras.layers.LeakyReLU()(layer)
+  layer = tf.keras.layers.Dense(64, kernel_regularizer=tf.keras.regularizers.l2(0.01))(layer)
+  layer = tf.keras.layers.LeakyReLU()(layer)
+  layer = tf.keras.layers.Dense(32, kernel_regularizer=tf.keras.regularizers.l2(0.01))(layer)
+  layer = tf.keras.layers.LeakyReLU()(layer)
+  output_layer = tf.keras.layers.Dense(1)(layer)
+
+  # Create the model
+  model = tf.keras.Model(inputs=input_layer, outputs=output_layer)
 
   # Compile model
   optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
