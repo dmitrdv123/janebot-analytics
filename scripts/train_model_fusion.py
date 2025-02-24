@@ -237,7 +237,7 @@ if __name__ == '__main__':
     'order_book_std_bid_size_mean',
     'order_book_realized_volatility',
   ]
-  
+
   # Target variable (future relative price change)
   target_column = 'kline_futureClosePrice'
   
@@ -247,23 +247,23 @@ if __name__ == '__main__':
   y = df_features_merged[target_column].values
   
   # Train-Test Split
-  X_kline_train, X_kline_test, X_orderbook_train, X_orderbook_test, y_train, y_test = train_test_split(X_kline, X_orderbook, y, test_size=0.2, shuffle=False)
+  X_train_kline, X_test_kline, X_train_order_book, X_test_order_book, y_train, y_test = train_test_split(X_kline, X_orderbook, y, test_size=0.2, shuffle=False)
 
   # Reshape for LSTM
-  X_kline_train = X_kline_train.reshape(X_kline_train.shape[0], 1, X_kline_train.shape[1])
-  X_kline_test = X_kline_test.reshape(X_kline_test.shape[0], 1, X_kline_test.shape[1])
+  X_train_kline = X_train_kline.reshape(X_train_kline.shape[0], 1, X_train_kline.shape[1])
+  X_test_kline = X_test_kline.reshape(X_test_kline.shape[0], 1, X_test_kline.shape[1])
 
   # Reshape for CNN
-  X_orderbook_train = X_orderbook_train.reshape(X_orderbook_train.shape[0], X_orderbook_train.shape[1], 1)
-  X_orderbook_test = X_orderbook_test.reshape(X_orderbook_test.shape[0], X_orderbook_test.shape[1], 1)
-
+  X_train_order_book = X_train_order_book.reshape(X_train_order_book.shape[0], X_train_order_book.shape[1], 1)
+  X_test_order_book = X_test_order_book.reshape(X_test_order_book.shape[0], X_test_order_book.shape[1], 1)
+  
   # Define LSTM model for Kline
-  input_kline = tf.keras.layers.Input(shape=(1, X_kline_train.shape[2]))
+  input_kline = tf.keras.layers.Input(shape=(X_train_kline.shape[1], X_train_kline.shape[2]))
   layer_kline = tf.keras.layers.LSTM(256, activation='tanh', return_sequences=True)(input_kline)  # More units + return_sequences=True
   layer_kline = tf.keras.layers.LSTM(128, activation='tanh', return_sequences=False)(layer_kline)  # Additional LSTM layer
 
   # Define CNN model for Order Book with more filters
-  input_orderbook = tf.keras.layers.Input(shape=(X_orderbook_train.shape[1], 1))
+  input_orderbook = tf.keras.layers.Input(shape=(X_train_order_book.shape[1], X_train_order_book.shape[2]))
   layer_order_book = tf.keras.layers.Conv1D(256, kernel_size=3, activation='relu')(input_orderbook)
   layer_order_book = tf.keras.layers.MaxPooling1D(pool_size=2)(layer_order_book)
   layer_order_book = tf.keras.layers.Flatten()(layer_order_book)
@@ -283,17 +283,17 @@ if __name__ == '__main__':
   lr_scheduler = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, min_lr=1e-6, verbose=1)
   early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
   model.fit(
-    [X_kline_train, X_orderbook_train], 
+    [X_train_kline, X_train_order_book], 
     y_train, 
     epochs=1000, 
     batch_size=32, 
-    validation_data=([X_kline_test, X_orderbook_test], y_test), 
+    validation_data=([X_test_kline, X_test_order_book], y_test), 
     verbose=1, 
     callbacks=[lr_scheduler, early_stopping]
   )
 
   # Predictions
-  y_pred = model.predict([X_kline_test, X_orderbook_test])
+  y_pred = model.predict([X_test_kline, X_test_order_book])
 
   # Calculate Errors
   mse = mean_squared_error(y_test, y_pred)
