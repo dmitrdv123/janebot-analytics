@@ -297,20 +297,6 @@ if __name__ == '__main__':
   print(f'Mean Squared Error (MSE): {mse:.6f}')
   print(f'Mean Absolute Error (MAE): {mae:.6f}')
 
-  # Convert predictions to a 1D array
-  y_pred = y_pred.flatten()
-
-  # Plot actual vs predicted relative price change
-  plt.figure(figsize=(12, 6))
-  plt.plot(y_test, label="Actual Relative Price Change", color="blue", alpha=0.7)
-  plt.plot(y_pred, label="Predicted Relative Price Change", color="red", linestyle="dashed", alpha=0.7)
-
-  plt.xlabel("Time Step")
-  plt.ylabel("Relative Price Change")
-  plt.title("Actual vs. Predicted Relative Price Change")
-  plt.legend()
-  plt.show()
-
   # Save scaled dataset
   df_features_kline_scaled.to_csv(f'{folder_features_kline}/features_scaled.csv')
   print('Scaled dataset have been saved.')
@@ -325,3 +311,17 @@ if __name__ == '__main__':
   for scaler_name, scaler in scalers_features_order_book.items():
     joblib.dump(scaler, f'models/model_fusion_scaler_order_book_{scaler_name}.pkl')
   print('Scalers have been saved.')
+
+  # Convert predictions to a 1D array
+  y_pred = y_pred.flatten()
+
+  # Plot actual vs predicted relative price change
+  plt.figure(figsize=(12, 6))
+  plt.plot(y_test, label="Actual Relative Price Change", color="blue", alpha=0.7)
+  plt.plot(y_pred, label="Predicted Relative Price Change", color="red", linestyle="dashed", alpha=0.7)
+
+  plt.xlabel("Time Step")
+  plt.ylabel("Relative Price Change")
+  plt.title("Actual vs. Predicted Relative Price Change")
+  plt.legend()
+  plt.show()
