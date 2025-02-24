@@ -130,6 +130,9 @@ def calc_features_kline_based(df_features):
 
   # Convert startTime to timestamp
   df_features['startTime'] = df_features['startTime'].astype('int64') // 10**6
+  
+  # Order by timestamp ascending
+  df_features = df_features.sort_values(by='startTime')
 
   return df_features
 
@@ -144,6 +147,9 @@ def calc_features_kline(symbol, interval):
   df_features['turnover'] = df_features['turnover'].astype(float)
 
   df_features = calc_features_kline_based(df_features)
+  
+  # Order by timestamp ascending
+  df_features_agg = df_features_agg.sort_values(by='timestamp')
 
   # Save the features to a CSV file
   save_features(df_features, 'features/kline', symbol, interval)
@@ -336,6 +342,9 @@ def calc_features_order_book(symbol):
   # Convert startTime to timestamp
   df_features_agg['timestamp'] = df_features_agg['timestamp'].astype('int64') // 10**6
 
+  # Order by timestamp ascending
+  df_features_agg = df_features_agg.sort_values(by='timestamp')
+
   # Save to CSV
   save_features(df_features_agg, 'features/order_book', symbol)
 
@@ -375,6 +384,9 @@ def calc_features_funding_rate(symbol):
 
   # Convert startTime to timestamp
   df_features['fundingRateTimestamp'] = df_features['fundingRateTimestamp'].astype('int64') // 10**6
+  
+  # Order by timestamp ascending
+  df_features = df_features.sort_values(by='fundingRateTimestamp')
 
   save_features(df_features, 'features/funding_rate', symbol)
 
@@ -438,6 +450,9 @@ def calc_features_long_short_ratio(symbol, period):
 
   # Convert startTime to timestamp
   df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
+  
+  # Order by timestamp ascending
+  df_features = df_features.sort_values(by='timestamp')
 
   save_features(df_features, f'features/long_short_ratio', symbol, period)
 
@@ -478,6 +493,9 @@ def calc_features_open_interest(symbol, intervalTime):
 
   # Convert startTime to timestamp
   df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
+  
+  # Order by timestamp ascending
+  df_features = df_features.sort_values(by='timestamp')
 
   save_features(df_features, f'features/open_interest', symbol, intervalTime)
 
@@ -577,6 +595,9 @@ def calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio
   # Calculate correlation between buyRatio and price over 5 minutes
   df['features_long_short_ratio_corr_long_short_price_5min'] = df['features_long_short_ratio_buyRatio'].rolling(window=5).corr(df['features_kline_closePrice'])
   df['features_long_short_ratio_corr_long_short_price_10min'] = df['features_long_short_ratio_buyRatio'].rolling(window=10).corr(df['features_kline_closePrice'])
+
+  # Order by timestamp ascending
+  df = df.sort_values(by='features_kline_startTime')
 
   save_features(df, f'features/merged', symbol)
 
