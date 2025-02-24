@@ -321,7 +321,7 @@ if __name__ == '__main__':
 
   # Save the feature and target scalers
   for scaler_name, scaler in scalers_features_kline.items():
-    joblib.dump(scaler, f'models/model_fusion_kline_scaler_{scaler_name}.pkl')
+    joblib.dump(scaler, f'models/model_fusion_scaler_kline_{scaler_name}.pkl')
   for scaler_name, scaler in scalers_features_order_book.items():
-    joblib.dump(scaler, f'models/model_fusion_order_book_scaler_{scaler_name}.pkl')
+    joblib.dump(scaler, f'models/model_fusion_scaler_order_book_{scaler_name}.pkl')
   print('Scalers have been saved.')
