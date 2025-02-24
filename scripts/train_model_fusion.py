@@ -156,6 +156,11 @@ if __name__ == '__main__':
   
   # Merge features
   df_features_merged = merge_feature(df_features_kline, df_features_order_book)
+  
+  # Order features by timestamp ascending
+  df_features_merged = df_features_merged.sort_values(by='kline_startTime')
+  
+  # Save features
   df_features_merged.to_csv(f'features/merged/{symbol}/features.csv')
 
   # Define feature columns
