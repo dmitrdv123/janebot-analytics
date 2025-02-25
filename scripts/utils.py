@@ -1,35 +1,46 @@
 import os
+import pandas as pd
 
 # Create a function to ensure directories exist
 def ensure_directory(directory):
   if not os.path.exists(directory):
     os.makedirs(directory)
 
-# **RSI** (14-period as a common choice)
-def calculate_rsi(df, period=14):
-  delta = df['closePrice'].diff()
-  gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-  loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-  rs = gain / loss
-  rsi = 100 - (100 / (1 + rs))
-  return rsi
+def load_data(base_folder_path: str, file_extension: str = '.csv'):
+  '''
+  Downloads all files from subfolders (organized by date) inside a given folder and combines them into a single dataset (DataFrame).
 
-# **MACD** (12-period and 26-period EMAs, and 9-period Signal line)
-def calculate_macd(df, fast_period=12, slow_period=26, signal_period=9):
-  macd_line = df['closePrice'].ewm(span=fast_period, adjust=False).mean() - df['closePrice'].ewm(span=slow_period, adjust=False).mean()
-  signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
-  histogram = macd_line - signal_line
-  return macd_line, signal_line, histogram
+  Args:
+  - base_folder_path (str): Path to the base folder containing subfolders (named by date).
+  - file_extension (str): Extension of files to download (default is '.csv').
 
-# **Stochastic Oscillator** (14-period %K and %D)
-def calculate_stochastic(df, period=14):
-  low_min = df['lowPrice'].rolling(window=period).min()
-  high_max = df['highPrice'].rolling(window=period).max()
-  k_line = 100 * (df['closePrice'] - low_min) / (high_max - low_min)
-  d_line = k_line.rolling(window=3).mean()  # 3-period %D
-  return k_line, d_line
+  Returns:
+  - pd.DataFrame: Combined dataset of all files in the subfolders.
+  '''
+  all_files = []
 
-# **Rate of Change (ROC)** - Percentage change over n-periods
-def calculate_roc(df, period=14):
-  roc = ((df['closePrice'] - df['closePrice'].shift(period)) / df['closePrice'].shift(period)) * 100
-  return roc
+  # Check if base folder exists
+  if not os.path.exists(base_folder_path):
+    raise FileNotFoundError(f'The base folder {base_folder_path} does not exist.')
+
+  # Iterate over the subfolders (which represent dates)
+  for subfolder_name in os.listdir(base_folder_path):
+    subfolder_path = os.path.join(base_folder_path, subfolder_name)
+
+    # Check if the subfolder is indeed a directory (i.e., not a file)
+    if os.path.isdir(subfolder_path):
+      # Iterate over the files in the subfolder
+      for filename in os.listdir(subfolder_path):
+        # Filter based on file extension (e.g., CSV)
+        if filename.endswith(file_extension):
+          file_path = os.path.join(subfolder_path, filename)
+          # Read file (assuming CSV for simplicity)
+          df = pd.read_csv(file_path)
+          all_files.append(df)
+
+  # Combine all files into a single DataFrame
+  if all_files:
+    combined_data = pd.concat(all_files, ignore_index=True)
+    return combined_data
+  else:
+    raise ValueError('No files found in the subfolders with the specified extension.')

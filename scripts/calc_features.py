@@ -3,46 +3,8 @@ import os
 import numpy as np
 import pandas as pd
 
-from utils import calculate_macd, calculate_roc, calculate_rsi, calculate_stochastic, ensure_directory
-
-def load_data(base_folder_path: str, file_extension: str = '.csv'):
-  '''
-  Downloads all files from subfolders (organized by date) inside a given folder and combines them into a single dataset (DataFrame).
-
-  Args:
-  - base_folder_path (str): Path to the base folder containing subfolders (named by date).
-  - file_extension (str): Extension of files to download (default is '.csv').
-
-  Returns:
-  - pd.DataFrame: Combined dataset of all files in the subfolders.
-  '''
-  all_files = []
-
-  # Check if base folder exists
-  if not os.path.exists(base_folder_path):
-    raise FileNotFoundError(f'The base folder {base_folder_path} does not exist.')
-
-  # Iterate over the subfolders (which represent dates)
-  for subfolder_name in os.listdir(base_folder_path):
-    subfolder_path = os.path.join(base_folder_path, subfolder_name)
-
-    # Check if the subfolder is indeed a directory (i.e., not a file)
-    if os.path.isdir(subfolder_path):
-      # Iterate over the files in the subfolder
-      for filename in os.listdir(subfolder_path):
-        # Filter based on file extension (e.g., CSV)
-        if filename.endswith(file_extension):
-          file_path = os.path.join(subfolder_path, filename)
-          # Read file (assuming CSV for simplicity)
-          df = pd.read_csv(file_path)
-          all_files.append(df)
-
-  # Combine all files into a single DataFrame
-  if all_files:
-    combined_data = pd.concat(all_files, ignore_index=True)
-    return combined_data
-  else:
-    raise ValueError('No files found in the subfolders with the specified extension.')
+from utils import ensure_directory, load_data
+from utils_features import calc_features_kline_based
 
 def save_features(df, base_folder, symbol, interval=None):
   if interval:
@@ -54,88 +16,6 @@ def save_features(df, base_folder, symbol, interval=None):
   df.to_csv(filename, index=False)
   print(f'Feature saved to {filename}')
 
-def calc_features_kline_based(df_features):
-  # Convert startTime to datetime format (assuming startTime column exists)
-  df_features['startTime'] = pd.to_datetime(df_features['startTime'], unit='ms')
-
-  # Ensure numeric columns are properly cast
-  df_features['openPrice'] = df_features['openPrice'].astype(float)
-  df_features['highPrice'] = df_features['highPrice'].astype(float)
-  df_features['lowPrice'] = df_features['lowPrice'].astype(float)
-  df_features['closePrice'] = df_features['closePrice'].astype(float)
-
-  # Features
-
-  # 1. Price & Return Features
-
-  # 1.1. Price Change (Difference between last close and previous close)
-  df_features['priceChange'] = df_features['closePrice'].diff()
-
-  # 1.1.1 Relative price change (percentage change)
-  df_features["relativePriceChange"] = df_features["closePrice"].pct_change()
-
-  # 1.2. Log Return
-  df_features['logReturn'] = np.log(df_features['closePrice'] / df_features['closePrice'].shift(1))
-
-  # 1.3. Short-Term Moving Averages (5 and 10-period)
-  df_features['SMA_5'] = df_features['closePrice'].rolling(window=5).mean()
-  df_features['SMA_10'] = df_features['closePrice'].rolling(window=10).mean()
-
-  # 1.4. Short-Term Exponential Moving Averages (5 and 10-period)
-  df_features['EMA_5'] = df_features['closePrice'].ewm(span=5, adjust=False).mean()
-  df_features['EMA_10'] = df_features['closePrice'].ewm(span=10, adjust=False).mean()
-
-  # 2. Time-Based Features
-
-  # 2.1. Extract Hour of the Day (0-23)
-  df_features['hourOfDay'] = df_features['startTime'].dt.hour
-
-  # 2.2. Extract Day of the Week (0-6, where 0 is Monday)
-  df_features['dayOfWeek'] = df_features['startTime'].dt.dayofweek
-
-  # 2.3. Extract Week of the Year (1-52)
-  df_features['weekOfYear'] = df_features['startTime'].dt.isocalendar().week
-
-  # 2.4. Extract Month of the Year (1-12)
-  df_features['monthOfYear'] = df_features['startTime'].dt.month
-
-  # 2.5. Extract Minute of the Hour (0-59)
-  df_features['minuteOfHour'] = df_features['startTime'].dt.minute
-
-  # 2.6. Identify if the day is a weekend (0 = False, 1 = True)
-  df_features['isWeekend'] = df_features['dayOfWeek'].isin([5, 6]).astype(int)
-
-  # 3. Volatility Features
-
-  # 3.1. High-Low Range (Price Volatility in a Minute)
-  df_features['highLowRange'] = df_features['highPrice'] - df_features['lowPrice']
-
-  # 3.2. Standard Deviation of Returns (Rolling window of 5,10 minutes)
-  df_features['stdReturn_5m'] = df_features['logReturn'].rolling(window=5).std()
-  df_features['stdReturn_10m'] = df_features['logReturn'].rolling(window=10).std()
-
-  # 4. Momentum Indicators
-
-  # **RSI** (14-period as a common choice)
-  df_features['RSI_14'] = calculate_rsi(df_features, period=14)
-
-  # **MACD** (12-period and 26-period EMAs, and 9-period Signal line)
-  df_features['MACD_line'], df_features['MACD_signal'], df_features['MACD_histogram'] = calculate_macd(df_features)
-
-  # **Stochastic Oscillator** (14-period %K and %D)
-  df_features['Stochastic_K'], df_features['Stochastic_D'] = calculate_stochastic(df_features)
-
-  # Calculate ROC with 14-period window
-  df_features['ROC_14'] = calculate_roc(df_features, period=14)
-
-  # Convert startTime to timestamp
-  df_features['startTime'] = df_features['startTime'].astype('int64') // 10**6
-  
-  # Order by timestamp ascending
-  df_features = df_features.sort_values(by='startTime')
-
-  return df_features
-
 def calc_features_kline(symbol, interval):
   print(f'Calculate kline features')
 
@@ -143,6 +23,11 @@ def calc_features_kline(symbol, interval):
   df_features = load_data(f'data/kline/{symbol}/{interval}')
 
   # Ensure numeric columns are properly cast
+  df_features['startTime'] = df_features['startTime'].astype(float)
+  df_features['openPrice'] = df_features['openPrice'].astype(float)
+  df_features['highPrice'] = df_features['highPrice'].astype(float)
+  df_features['lowPrice'] = df_features['lowPrice'].astype(float)
+  df_features['closePrice'] = df_features['closePrice'].astype(float)
   df_features['volume'] = df_features['volume'].astype(float)
   df_features['turnover'] = df_features['turnover'].astype(float)
 

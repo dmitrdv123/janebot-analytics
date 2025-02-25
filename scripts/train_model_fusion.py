@@ -8,7 +8,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 def prepare_features_kline(df):
+  # Define model output  
+  df['futureRelativePriceChange'] = df['relativePriceChange'].shift(-1)
+  df['futurePriceChange'] = df['priceChange'].shift(-1)
+  df['futureClosePrice'] = df['closePrice'].shift(-1)
+
   # Define columns for scale 
+  target_columns = ['futureClosePrice']
   price_columns = ['openPrice', 'highPrice', 'lowPrice', 'closePrice', 'SMA_5', 'SMA_10', 'EMA_5', 'EMA_10']
   price_change_column = ['priceChange']
   volume_columns = ['volume']
@@ -19,6 +25,7 @@ def prepare_features_kline(df):
 
   # Initialize scalers
   scalers = {
+    'target': MinMaxScaler(),
     'price': MinMaxScaler(),
     'price_change': RobustScaler(),
     'volume': RobustScaler(),
@@ -28,6 +35,7 @@ def prepare_features_kline(df):
   }
 
   # Apply different scalers
+  df[target_columns] = scalers['target'].fit_transform(df[target_columns])
   df[price_columns] = scalers['price'].fit_transform(df[price_columns])
   df[price_change_column] = scalers['price_change'].fit_transform(df[price_change_column])
   df[volume_columns] = scalers['volume'].fit_transform(df[volume_columns])
@@ -44,11 +52,6 @@ def prepare_features_kline(df):
   df['weekOfYear'] = df['weekOfYear'] / 51 # Normalize to [0,1]
   df['monthOfYear'] = df['monthOfYear'] / 11 # Normalize to [0,1] (0=Jan, 11=Dec)
   df['minuteOfHour'] = df['minuteOfHour'] / 59 # Normalize to [0,1]
-
-  # Define model output  
-  df['futureRelativePriceChange'] = df['relativePriceChange'].shift(-1)
-  df['futurePriceChange'] = df['priceChange'].shift(-1)
-  df['futureClosePrice'] = df['closePrice'].shift(-1)
 
   # Drop NaN values (last row will be NaN after shifting)
   df.dropna(inplace=True)
