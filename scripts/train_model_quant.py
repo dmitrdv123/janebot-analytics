@@ -51,6 +51,11 @@ def compute_hamiltonian(df, current_idx, timeframe=1, lookback=5):
     H[0, 2] = H[2, 0] = -J / 2
     H[1, 2] = H[2, 1] = -J / 2
 
+    # Флуктуации вакуума
+    eta = 0.01  # Амплитуда флуктуаций
+    vacuum_fluct = eta * np.random.uniform(-1, 1, (3, 3)) * math.exp(-turnover_factor)
+    H += vacuum_fluct + vacuum_fluct.conj().T  # Сохраняем hermiticity
+
     noise_amplitude = 0.05 * (1 / math.log(timeframe + 1)) * (1.2 if T > T_c else 1)
     noise = np.random.normal(0, noise_amplitude, (3, 3)) + 1j * np.random.normal(0, noise_amplitude, (3, 3))
     H += noise
@@ -58,7 +63,7 @@ def compute_hamiltonian(df, current_idx, timeframe=1, lookback=5):
 
     return H / 1000
 
-def quantum_teleport_long_range(df, current_idx, prev_states, entangle_range=3, prev_error=0):
+def quantum_teleport_long_range(df, current_idx, prev_states, entangle_range=3, prev_error=0, lookback=5):
     if not prev_states or current_idx <= 0:
         return None
     teleported_amps = np.zeros(3, dtype=complex)
@@ -170,7 +175,7 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
         growth_amp, decline_amp, stagnation_amp = evolve_wave_function(
             prev_states[current_idx - 1], H, turnover_factor, volume_factor, T, T_c
         )
-        teleported_amps = quantum_teleport_long_range(df, current_idx, prev_states, entangle_range, prev_error)
+        teleported_amps = quantum_teleport_long_range(df, current_idx, prev_states, entangle_range, prev_error, lookback)
         if teleported_amps:
             growth_amp = 0.7 * growth_amp + 0.3 * teleported_amps[0]
             decline_amp = 0.7 * decline_amp + 0.3 * teleported_amps[1]
@@ -323,7 +328,7 @@ plt.plot(times, collapsed_prices, label="Ансамбль closePrice (квант
 plt.fill_between(times, ci_lowers, ci_uppers, color="green", alpha=0.2, label="95% Доверительный интервал")
 plt.xlabel("Время (startTime)")
 plt.ylabel("Цена (USD)")
-plt.title(f"Сравнение с запутанностью на расстоянии и томографией (timeframe={timeframe} мин, ensemble_size={ensemble_size})")
+plt.title(f"Сравнение с флуктуациями вакуума (timeframe={timeframe} мин, ensemble_size={ensemble_size})")
 plt.legend()
 plt.xticks(rotation=45)
 plt.grid(True)
