@@ -4,12 +4,15 @@ import math
 import cmath
 import random
 import numpy as np
+from scipy.linalg import expm
+
+from utils import load_data
 
 def sigmoid(x):
     """Сигмоидная функция для нормализации."""
     return 1 / (1 + math.exp(-x))
 
-def compute_hamiltonian(df, current_idx, lookback=5):
+def compute_hamiltonian(df, current_idx, timeframe=1, lookback=5):
     """Рассчитывает гамильтониан на основе рыночных данных."""
     row = df.iloc[current_idx]
     range_price = row["highPrice"] - row["lowPrice"]
@@ -28,33 +31,44 @@ def compute_hamiltonian(df, current_idx, lookback=5):
         avg_volume = volume
         avg_turnover = turnover
 
-    # Гамильтониан: энергия системы
-    h = (range_price / avg_range) * (volume / avg_volume)  # Волатильность и активность
-    h += turnover / avg_turnover  # Влияние денежного потока
-    return h / 1000  # Нормализация для численной стабильности
+    volatility_factor = range_price / avg_range if avg_range != 0 else 1
+    volume_factor = volume / avg_volume if avg_volume != 0 else 1
+    turnover_factor = turnover / avg_turnover if avg_turnover != 0 else 1
+    
+    h_growth = volatility_factor * volume_factor
+    h_decline = volatility_factor * (2 - volume_factor)
+    h_stagnation = turnover_factor
 
-def evolve_wave_function(prev_amps, h, dt=1):
-    """Эволюция волновой функции с уравнением Шрёдингера."""
-    growth_amp, decline_amp, stagnation_amp = prev_amps
-    # Унитарный оператор: U = exp(-iHt/ħ), где ħ = 1 для упрощения
-    u = cmath.exp(-1j * h * dt)
+    H = np.zeros((3, 3), dtype=complex)
+    H[0, 0] = h_growth
+    H[1, 1] = h_decline
+    H[2, 2] = h_stagnation
+
+    interaction_strength = 0.1 * volatility_factor
+    H[0, 1] = H[1, 0] = interaction_strength
+    H[0, 2] = H[2, 0] = interaction_strength / 2
+    H[1, 2] = H[2, 1] = interaction_strength / 2
+
+    noise_amplitude = 0.05 * (1 / math.log(timeframe + 1))
+    noise = np.random.normal(0, noise_amplitude, (3, 3)) + 1j * np.random.normal(0, noise_amplitude, (3, 3))
+    H += noise
+    H = (H + H.conj().T) / 2
+
+    return H / 1000
+
+def evolve_wave_function(prev_amps, H, dt=1):
+    psi = np.array(prev_amps, dtype=complex)
+    U = expm(-1j * H * dt)
+    new_psi = U @ psi
     
-    # Эволюция амплитуд
-    new_growth_amp = growth_amp * u
-    new_decline_amp = decline_amp * u
-    new_stagnation_amp = stagnation_amp * u
-    
-    # Нормализация
-    norm = math.sqrt(abs(new_growth_amp)**2 + abs(new_decline_amp)**2 + abs(new_stagnation_amp)**2)
+    norm = math.sqrt(sum(abs(x)**2 for x in new_psi))
     if norm > 0:
-        new_growth_amp /= norm
-        new_decline_amp /= norm
-        new_stagnation_amp /= norm
+        new_psi /= norm
     
-    return new_growth_amp, new_decline_amp, new_stagnation_amp
+    return tuple(new_psi)
 
-def calculate_wave_function(df, current_idx, prev_amps=None, lookback=5):
-    """Рассчитывает волновую функцию с запутанностью и эволюцией."""
+def calculate_wave_function(df, current_idx, prev_amps=None, timeframe=1, lookback=5):
+    """Рассчитывает волновую функцию."""
     row = df.iloc[current_idx]
     open_price = row["openPrice"]
     high_price = row["highPrice"]
@@ -90,8 +104,8 @@ def calculate_wave_function(df, current_idx, prev_amps=None, lookback=5):
         growth_amp = decline_amp = stagnation_amp = complex(1 / math.sqrt(3), 0)
     else:
         # Эволюция от предыдущего состояния
-        h = compute_hamiltonian(df, current_idx - 1, lookback)
-        growth_amp, decline_amp, stagnation_amp = evolve_wave_function(prev_amps, h)
+        H = compute_hamiltonian(df, current_idx - 1, timeframe, lookback)
+        growth_amp, decline_amp, stagnation_amp = evolve_wave_function(prev_amps, H)
 
     # Корректировка амплитуд текущей свечой
     if price_change > 0:
@@ -134,12 +148,12 @@ def calculate_wave_function(df, current_idx, prev_amps=None, lookback=5):
         growth_amp += 0.15
         decline_amp += 0.15
 
-    # Нормализация
-    norm = math.sqrt(abs(growth_amp)**2 + abs(decline_amp)**2 + abs(stagnation_amp)**2)
+# Нормализация
+    amps = np.array([growth_amp, decline_amp, stagnation_amp], dtype=complex)
+    norm = math.sqrt(sum(abs(x)**2 for x in amps))
     if norm > 0:
-        growth_amp /= norm
-        decline_amp /= norm
-        stagnation_amp /= norm
+        amps /= norm
+    growth_amp, decline_amp, stagnation_amp = amps
 
     # Вероятности
     growth_prob = abs(growth_amp)**2
@@ -148,12 +162,13 @@ def calculate_wave_function(df, current_idx, prev_amps=None, lookback=5):
 
     return (growth_amp, decline_amp, stagnation_amp), (growth_prob, decline_prob, stagnation_prob), avg_range
 
-def predict_close_price(df, current_idx, prev_amps=None, lookback=5):
-    """Предсказывает closePrice с эволюцией и коллапсом."""
+def predict_close_price(df, current_idx, prev_amps=None, timeframe=1, ensemble_size=10):
+    """Предсказывает closePrice."""
+    lookback = max(5, int(60 / timeframe))
     row = df.iloc[current_idx]
     
     # Расчёт волновой функции
-    amps, probs, avg_range = calculate_wave_function(df, current_idx, prev_amps, lookback)
+    amps, probs, avg_range = calculate_wave_function(df, current_idx, prev_amps, timeframe, lookback)
     growth_amp, decline_amp, stagnation_amp = amps
     growth_prob, decline_prob, stagnation_prob = probs
 
@@ -170,36 +185,52 @@ def predict_close_price(df, current_idx, prev_amps=None, lookback=5):
                      (stagnation_prob * stagnation_price)
 
     # Коллапс
-    rand = random.random()
-    if rand < growth_prob:
-        collapsed_price = growth_price
-    elif rand < (growth_prob + decline_prob):
-        collapsed_price = decline_price
-    else:
-        collapsed_price = stagnation_price
+    collapsed_ensemble = []
+    for _ in range(ensemble_size):
+        rand = random.random()
+        if rand < growth_prob:
+            collapsed_ensemble.append(growth_price)
+        elif rand < (growth_prob + decline_prob):
+            collapsed_ensemble.append(decline_price)
+        else:
+            collapsed_ensemble.append(stagnation_price)
+    
+    collapsed_mean = np.mean(collapsed_ensemble)
+    collapsed_std = np.std(collapsed_ensemble)
+    ci_lower = collapsed_mean - 1.96 * collapsed_std
+    ci_upper = collapsed_mean + 1.96 * collapsed_std
 
-    return expected_close, collapsed_price, amps
+    return expected_close, collapsed_mean, ci_lower, ci_upper, amps
 
-# Загрузка данных из CSV
-csv_file = "data/kline/BTCUSDT/1/2025-02-14/01.csv"  # Укажи имя своего файла
-df = pd.read_csv(csv_file)
+# Загрузка данных
+symbol = 'BTCUSDT'
+interval = '1'  # Kline interval (1m, 5m, 15m, etc.)
+df = load_data(f'data/kline/{symbol}/{interval}')
 
 # Проверка колонок
 required_cols = ["startTime", "openPrice", "highPrice", "lowPrice", "closePrice", "volume", "turnover"]
 if not all(col in df.columns for col in required_cols):
     raise ValueError("CSV-файл должен содержать колонки: " + ", ".join(required_cols))
 
-# Прогноз и сбор данных
+# Прогноз квантовой модели
+timeframe = 1
+ensemble_size = 20
 expected_prices = []
 collapsed_prices = []
+ci_lowers = []
+ci_uppers = []
 actual_prices = df["closePrice"].tolist()[1:]
-times = df["startTime"].tolist()[1:]
+times = df["startTime"].tolist()[:-1]  # Время для предсказания — момент начала свечи
 prev_amps = None
 
 for i in range(len(df) - 1):
-    expected_close, collapsed_close, prev_amps = predict_close_price(df, i, prev_amps, lookback=5)
+    expected_close, collapsed_mean, ci_lower, ci_upper, prev_amps = predict_close_price(
+        df, i, prev_amps, timeframe, ensemble_size=ensemble_size
+    )
     expected_prices.append(expected_close)
-    collapsed_prices.append(collapsed_close)
+    collapsed_prices.append(collapsed_mean)
+    ci_lowers.append(ci_lower)
+    ci_uppers.append(ci_upper)
 
 # Расчёт ошибок
 if expected_prices and actual_prices:
@@ -207,19 +238,20 @@ if expected_prices and actual_prices:
     rmse_exp = math.sqrt(mse_exp)
     mse_col = sum((pred - actual) ** 2 for pred, actual in zip(collapsed_prices, actual_prices)) / len(collapsed_prices)
     rmse_col = math.sqrt(mse_col)
-    print(f"Ошибка модели (RMSE, ожидаемое): {rmse_exp:.2f} USD")
-    print(f"Ошибка модели (RMSE, после коллапса): {rmse_col:.2f} USD")
+    print(f"Ошибка квантовой модели (RMSE, ожидаемое): {rmse_exp:.2f} USD")
+    print(f"Ошибка квантовой модели (RMSE, ансамбль): {rmse_col:.2f} USD")
 else:
     print("Недостаточно данных для расчёта ошибки")
 
 # Построение графика
-plt.figure(figsize=(12, 6))
+plt.figure(figsize=(14, 7))
 plt.plot(times, actual_prices, label="Реальный closePrice", color="blue", marker="o")
-plt.plot(times, expected_prices, label="Ожидаемый closePrice", color="orange", linestyle="--", marker="x")
-plt.plot(times, collapsed_prices, label="Коллапсированный closePrice", color="green", linestyle="-.", marker="^")
+plt.plot(times, expected_prices, label="Ожидаемый closePrice (квант)", color="orange", linestyle="--", marker="x")
+plt.plot(times, collapsed_prices, label="Ансамбль closePrice (квант)", color="green", linestyle="-.", marker="^")
+plt.fill_between(times, ci_lowers, ci_uppers, color="green", alpha=0.2, label="95% Доверительный интервал")
 plt.xlabel("Время (startTime)")
 plt.ylabel("Цена (USD)")
-plt.title("Сравнение реальных, ожидаемых и коллапсированных цен BTC")
+plt.title(f"Сравнение моделей (timeframe={timeframe} мин, ensemble_size={ensemble_size})")
 plt.legend()
 plt.xticks(rotation=45)
 plt.grid(True)
