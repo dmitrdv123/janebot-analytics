@@ -1,4 +1,3 @@
-import pandas as pd
 import matplotlib.pyplot as plt
 import math
 import cmath
@@ -44,10 +43,11 @@ def compute_hamiltonian(df, current_idx, timeframe=1, lookback=5):
     H[1, 1] = h_decline
     H[2, 2] = h_stagnation
 
-    interaction_strength = 0.1 * volatility_factor
-    H[0, 1] = H[1, 0] = interaction_strength
-    H[0, 2] = H[2, 0] = interaction_strength / 2
-    H[1, 2] = H[2, 1] = interaction_strength / 2
+    # Туннелирование: недиагональные элементы зависят от volume
+    tunneling_factor = 0.1 * volume_factor * volatility_factor
+    H[0, 1] = H[1, 0] = tunneling_factor  # Рост <-> Падение
+    H[0, 2] = H[2, 0] = tunneling_factor / 2  # Рост <-> Стагнация
+    H[1, 2] = H[2, 1] = tunneling_factor / 2  # Падение <-> Стагнация
 
     noise_amplitude = 0.05 * (1 / math.log(timeframe + 1))
     noise = np.random.normal(0, noise_amplitude, (3, 3)) + 1j * np.random.normal(0, noise_amplitude, (3, 3))
@@ -56,18 +56,22 @@ def compute_hamiltonian(df, current_idx, timeframe=1, lookback=5):
 
     return H / 1000
 
-def evolve_wave_function(prev_amps, H, dt=1):
+def evolve_wave_function(prev_amps, H, turnover_factor, dt=1):
     psi = np.array(prev_amps, dtype=complex)
     U = expm(-1j * H * dt)
-    new_psi = U @ psi
     
-    norm = math.sqrt(sum(abs(x)**2 for x in new_psi))
+    # Диффузия: добавляем сглаживание пропорционально turnover
+    D = 0.01 * turnover_factor  # Коэффициент диффузии
+    diffusion = D * (psi - np.roll(psi, 1))  # Примитивная аппроксимация ∇²ψ
+    psi = U @ psi - 1j * diffusion
+    
+    norm = math.sqrt(sum(abs(x)**2 for x in psi))
     if norm > 0:
-        new_psi /= norm
+        psi /= norm
     
-    return tuple(new_psi)
+    return tuple(psi)
 
-def calculate_wave_function(df, current_idx, prev_amps=None, timeframe=1, lookback=5):
+def calculate_wave_function(df, current_idx, prev_amps=None, prev_error=0, timeframe=1, lookback=5):
     """Рассчитывает волновую функцию."""
     row = df.iloc[current_idx]
     open_price = row["openPrice"]
@@ -92,12 +96,16 @@ def calculate_wave_function(df, current_idx, prev_amps=None, timeframe=1, lookba
         hist_ranges = hist_df["highPrice"] - hist_df["lowPrice"]
         avg_range = hist_ranges.mean()
         avg_volume = hist_df["volume"].mean()
+        avg_turnover = hist_df["turnover"].mean()
         trend_strength = np.corrcoef(hist_df["startTime"], hist_df["closePrice"])[0, 1] if len(hist_df) > 1 else 0
     else:
         avg_price_change = price_change
         avg_range = range_price
         avg_volume = volume
+        avg_turnover = turnover
         trend_strength = 0
+
+    turnover_factor = turnover / avg_turnover if avg_turnover != 0 else 1
 
     # Начальные амплитуды (если нет предыдущих)
     if prev_amps is None:
@@ -105,7 +113,7 @@ def calculate_wave_function(df, current_idx, prev_amps=None, timeframe=1, lookba
     else:
         # Эволюция от предыдущего состояния
         H = compute_hamiltonian(df, current_idx - 1, timeframe, lookback)
-        growth_amp, decline_amp, stagnation_amp = evolve_wave_function(prev_amps, H)
+        growth_amp, decline_amp, stagnation_amp = evolve_wave_function(prev_amps, H, turnover_factor)
 
     # Корректировка амплитуд текущей свечой
     if price_change > 0:
@@ -121,9 +129,9 @@ def calculate_wave_function(df, current_idx, prev_amps=None, timeframe=1, lookba
         growth_amp += 0.25
         decline_amp += 0.25
 
-    # Интерференция с фазой, зависящей от turnover
+    # Интерференция с обратной связью
     if avg_range != 0 and avg_volume != 0:
-        phase = sigmoid(avg_price_change / avg_range + (turnover / avg_volume - 1)) * 2 * math.pi
+        phase = sigmoid(avg_price_change / avg_range + (turnover / avg_volume - 1) + 0.01 * prev_error) * 2 * math.pi
     else:
         phase = 0
     interference_factor = 0.15 * cmath.exp(1j * phase)
@@ -148,7 +156,7 @@ def calculate_wave_function(df, current_idx, prev_amps=None, timeframe=1, lookba
         growth_amp += 0.15
         decline_amp += 0.15
 
-# Нормализация
+    # Нормализация
     amps = np.array([growth_amp, decline_amp, stagnation_amp], dtype=complex)
     norm = math.sqrt(sum(abs(x)**2 for x in amps))
     if norm > 0:
@@ -162,13 +170,13 @@ def calculate_wave_function(df, current_idx, prev_amps=None, timeframe=1, lookba
 
     return (growth_amp, decline_amp, stagnation_amp), (growth_prob, decline_prob, stagnation_prob), avg_range
 
-def predict_close_price(df, current_idx, prev_amps=None, timeframe=1, ensemble_size=10):
+def predict_close_price(df, current_idx, prev_amps=None, prev_error=0, timeframe=1, ensemble_size=10):
     """Предсказывает closePrice."""
     lookback = max(5, int(60 / timeframe))
     row = df.iloc[current_idx]
     
     # Расчёт волновой функции
-    amps, probs, avg_range = calculate_wave_function(df, current_idx, prev_amps, timeframe, lookback)
+    amps, probs, avg_range = calculate_wave_function(df, current_idx, prev_amps, prev_error, timeframe, lookback)
     growth_amp, decline_amp, stagnation_amp = amps
     growth_prob, decline_prob, stagnation_prob = probs
 
@@ -222,15 +230,17 @@ ci_uppers = []
 actual_prices = df["closePrice"].tolist()[1:]
 times = df["startTime"].tolist()[:-1]  # Время для предсказания — момент начала свечи
 prev_amps = None
+prev_error = 0
 
 for i in range(len(df) - 1):
     expected_close, collapsed_mean, ci_lower, ci_upper, prev_amps = predict_close_price(
-        df, i, prev_amps, timeframe, ensemble_size=ensemble_size
+        df, i, prev_amps, prev_error, timeframe, ensemble_size=ensemble_size
     )
     expected_prices.append(expected_close)
     collapsed_prices.append(collapsed_mean)
     ci_lowers.append(ci_lower)
     ci_uppers.append(ci_upper)
+    prev_error = actual_prices[i] - collapsed_mean if i < len(actual_prices) else 0
 
 # Расчёт ошибок
 if expected_prices and actual_prices:
