@@ -168,6 +168,12 @@ def vortex_operator(turnover_factor, avg_price_change, avg_range):
     V = np.diag([cmath.exp(1j * theta_vortex), cmath.exp(-1j * theta_vortex), 1, 1, 1, 1], k=0)
     return V
 
+def heat_engine_boost(turnover_factor):
+    T_hot = max(turnover_factor, 1 / turnover_factor if turnover_factor > 0 else 1)
+    T_cold = min(turnover_factor, 1 / turnover_factor if turnover_factor > 0 else 1)
+    eta = 1 - T_cold / T_hot if T_hot > 0 else 0
+    return 0.1 * eta * turnover_factor  # Преобразование энергии в амплитуды
+
 def evolve_wave_function(prev_amps, H, turnover_factor, volume_factor, T, T_c, avg_price_change, avg_range, dt=1):
     psi = np.array(prev_amps, dtype=complex)
     U = expm(-1j * H * dt)
@@ -182,14 +188,32 @@ def evolve_wave_function(prev_amps, H, turnover_factor, volume_factor, T, T_c, a
     
     psi = U @ psi
     
+    # Тепловая машина
+    heat_boost = heat_engine_boost(turnover_factor)
+    psi += heat_boost * psi  # Усиление амплитуд через энергию
+    
     norm = math.sqrt(sum(abs(x)**2 for x in psi))
     if norm > 0:
         psi /= norm
     
     return tuple(psi)
 
-def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, timeframe=1, lookback=5, entangle_range=3, ensemble_size_traj=5):
-    """Рассчитывает волновую функцию."""
+def calculate_cell_state(df, cell_start_idx, cell_end_idx, prev_cell_amps=None, timeframe=1, lookback=5):
+    # Локальная эволюция для ячейки
+    cell_amps = prev_cell_amps if prev_cell_amps is not None else tomography_initial_state(df, cell_start_idx, lookback)
+    for idx in range(cell_start_idx, min(cell_end_idx, len(df))):
+        H = compute_hamiltonian(df, idx, timeframe, lookback)
+        row = df.iloc[idx]
+        turnover_factor = row["turnover"] / df["turnover"][max(0, idx-lookback):idx+1].mean() if df["turnover"][max(0, idx-lookback):idx+1].mean() != 0 else 1
+        volume_factor = row["volume"] / df["volume"][max(0, idx-lookback):idx+1].mean() if df["volume"][max(0, idx-lookback):idx+1].mean() != 0 else 1
+        T = (row["highPrice"] - row["lowPrice"]) / df["highPrice"][max(0, idx-lookback):idx+1].mean() if df["highPrice"][max(0, idx-lookback):idx+1].mean() != 0 else 1 / volume_factor
+        T_c = 1
+        avg_price_change = df["closePrice"][max(0, idx-lookback):idx+1].mean()
+        avg_range = (df["highPrice"][max(0, idx-lookback):idx+1] - df["lowPrice"][max(0, idx-lookback):idx+1]).mean()
+        cell_amps = evolve_wave_function(cell_amps, H, turnover_factor, volume_factor, T, T_c, avg_price_change, avg_range)
+    return cell_amps
+
+def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, timeframe=1, lookback=5, entangle_range=3, ensemble_size_traj=5, cell_size=5):
     row = df.iloc[current_idx]
     open_price = row["openPrice"]
     high_price = row["highPrice"]
@@ -227,8 +251,17 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
     T = (range_price / avg_range if avg_range != 0 else 1) / volume_factor
     T_c = 1
 
-    # Квантовый ансамбль траекторий
+    # Квантовые ячейки
+    cell_idx = current_idx // cell_size
+    cell_start = cell_idx * cell_size
+    cell_end = min(cell_start + cell_size, len(df))
+    prev_cell_idx = max(0, cell_idx - 1)
+    prev_cell_start = prev_cell_idx * cell_size
+    prev_cell_amps = prev_states.get(prev_cell_start, None) if prev_states else None
+    cell_amps = calculate_cell_state(df, cell_start, cell_end, prev_cell_amps, timeframe, lookback)
+
     ensemble_amps = []
+    ensemble_correlators = []
     for traj in range(ensemble_size_traj):
         if prev_states is None or current_idx not in prev_states:
             growth_amp, decline_amp, stagnation_amp, fg_amp, fd_amp, fs_amp = tomography_initial_state(df, current_idx, lookback)
@@ -245,6 +278,14 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
                 fg_amp = 0.5 * fg_amp + 0.5 * holographic_amps[3]
                 fd_amp = 0.5 * fd_amp + 0.5 * holographic_amps[4]
                 fs_amp = 0.5 * fs_amp + 0.5 * holographic_amps[5]
+            # Влияние ячейки
+            if cell_amps:
+                growth_amp = 0.8 * growth_amp + 0.2 * cell_amps[0]
+                decline_amp = 0.8 * decline_amp + 0.2 * cell_amps[1]
+                stagnation_amp = 0.8 * stagnation_amp + 0.2 * cell_amps[2]
+                fg_amp = 0.8 * fg_amp + 0.2 * cell_amps[3]
+                fd_amp = 0.8 * fd_amp + 0.2 * cell_amps[4]
+                fs_amp = 0.8 * fs_amp + 0.2 * cell_amps[5]
 
         if price_change > 0:
             growth_amp += 0.4 if close_price == high_price else 0.3
@@ -305,6 +346,7 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
                 correlator_sum += correlator
                 correlator_count += 1
         avg_correlator = correlator_sum / correlator_count if correlator_count > 0 else 0.5
+        ensemble_correlators.append(avg_correlator)
         
         # Усиление амплитуд пропорционально корреляции
         correlation_boost = 0.1 * avg_correlator
@@ -325,9 +367,10 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
     mean_amps = np.mean(ensemble_amps, axis=0)
     growth_amp, decline_amp, stagnation_amp, fg_amp, fd_amp, fs_amp = mean_amps
     
+    mean_correlator = np.mean(ensemble_correlators) if ensemble_correlators else 0.5
     # Энтропия фон Неймана
     entropy = compute_entropy(ensemble_amps)
-    entropy_factor = 1 - min(entropy / math.log(6), 1)  # Нормализация от 0 до ln(6)
+    entropy_factor = 1 - min(entropy / math.log(6), 1)
 
     growth_prob = abs(growth_amp)**2 + abs(fg_amp)**2 * 0.5
     decline_prob = abs(decline_amp)**2 + abs(fd_amp)**2 * 0.5
@@ -337,17 +380,26 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
         growth_prob /= total
         decline_prob /= total
         stagnation_prob /= total
+    # Корректировка вероятностей с коррелятором
+    growth_prob *= (1 + 0.1 * mean_correlator)
+    decline_prob *= (1 + 0.1 * mean_correlator)
+    stagnation_prob *= (1 + 0.1 * mean_correlator)
+    total = growth_prob + decline_prob + stagnation_prob
+    if total > 0:
+        growth_prob /= total
+        decline_prob /= total
+        stagnation_prob /= total
 
-    return (growth_amp, decline_amp, stagnation_amp, fg_amp, fd_amp, fs_amp), (growth_prob, decline_prob, stagnation_prob), avg_range, entropy_factor
+    return (growth_amp, decline_amp, stagnation_amp, fg_amp, fd_amp, fs_amp), (growth_prob, decline_prob, stagnation_prob), avg_range, entropy_factor, mean_correlator
 
-def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timeframe=1, ensemble_size=10, entangle_range=3, ensemble_size_traj=5):
+def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timeframe=1, ensemble_size=10, entangle_range=3, ensemble_size_traj=5, cell_size=5):
     """Предсказывает closePrice."""
     lookback = max(5, int(60 / timeframe))
     row = df.iloc[current_idx]
     
     # Расчёт волновой функции
-    amps, probs, avg_range, entropy_factor = calculate_wave_function(
-        df, current_idx, prev_states, prev_error, timeframe, lookback, entangle_range, ensemble_size_traj
+    amps, probs, avg_range, entropy_factor, mean_correlator = calculate_wave_function(
+        df, current_idx, prev_states, prev_error, timeframe, lookback, entangle_range, ensemble_size_traj, cell_size
     )
     growth_amp, decline_amp, stagnation_amp, fg_amp, fd_amp, fs_amp = amps
     growth_prob, decline_prob, stagnation_prob = probs
@@ -381,7 +433,7 @@ def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timefra
     ci_lower = collapsed_mean - 1.96 * collapsed_std * entropy_factor
     ci_upper = collapsed_mean + 1.96 * collapsed_std * entropy_factor
 
-    return expected_close, collapsed_mean, ci_lower, ci_upper, amps
+    return expected_close, collapsed_mean, ci_lower, ci_upper, amps, mean_correlator
 
 # Загрузка данных
 symbol = 'BTCUSDT'
@@ -398,23 +450,26 @@ timeframe = 1
 ensemble_size = 20  # Для коллапса
 ensemble_size_traj = 5  # Для ансамбля траекторий
 entangle_range = 3
+cell_size = 5
 expected_prices = []
 collapsed_prices = []
 ci_lowers = []
 ci_uppers = []
 actual_prices = df["closePrice"].tolist()[1:]
 times = df["startTime"].tolist()[:-1]
+correlators = []
 prev_states = {}
 prev_error = 0
 
 for i in range(len(df) - 1):
-    expected_close, collapsed_mean, ci_lower, ci_upper, amps = predict_close_price(
-        df, i, prev_states, prev_error, timeframe, ensemble_size=ensemble_size, entangle_range=entangle_range, ensemble_size_traj=ensemble_size_traj
+    expected_close, collapsed_mean, ci_lower, ci_upper, amps, mean_correlator = predict_close_price(
+        df, i, prev_states, prev_error, timeframe, ensemble_size=ensemble_size, entangle_range=entangle_range, ensemble_size_traj=ensemble_size_traj, cell_size=cell_size
     )
     expected_prices.append(expected_close)
     collapsed_prices.append(collapsed_mean)
     ci_lowers.append(ci_lower)
     ci_uppers.append(ci_upper)
+    correlators.append(mean_correlator)
     prev_states[i] = amps
     prev_error = actual_prices[i] - collapsed_mean if i < len(actual_prices) else 0
 
@@ -429,17 +484,27 @@ if expected_prices and actual_prices:
 else:
     print("Недостаточно данных для расчёта ошибки")
 
-# Построение графика
-plt.figure(figsize=(14, 7))
-plt.plot(times, actual_prices, label="Реальный closePrice", color="blue", marker="o")
-plt.plot(times, expected_prices, label="Ожидаемый closePrice (квант)", color="orange", linestyle="--", marker="x")
-plt.plot(times, collapsed_prices, label="Ансамбль closePrice (квант)", color="green", linestyle="-.", marker="^")
-plt.fill_between(times, ci_lowers, ci_uppers, color="green", alpha=0.2, label="95% Доверительный интервал (с энтропией)")
-plt.xlabel("Время (startTime)")
-plt.ylabel("Цена (USD)")
-plt.title(f"Сравнение с корреляторами и энтропией (timeframe={timeframe} мин, ensemble_size={ensemble_size}, traj={ensemble_size_traj})")
-plt.legend()
+# Построение графиков
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), sharex=True)
+
+# График цен
+ax1.plot(times, actual_prices, label="Реальный closePrice", color="blue", marker="o")
+ax1.plot(times, expected_prices, label="Ожидаемый closePrice (квант)", color="orange", linestyle="--", marker="x")
+ax1.plot(times, collapsed_prices, label="Ансамбль closePrice (квант)", color="green", linestyle="-.", marker="^")
+ax1.fill_between(times, ci_lowers, ci_uppers, color="green", alpha=0.2, label="95% Доверительный интервал (с энтропией)")
+ax1.set_ylabel("Цена (USD)")
+ax1.set_title(f"Сравнение цен (timeframe={timeframe} мин, ensemble_size={ensemble_size}, traj={ensemble_size_traj})")
+ax1.legend()
+ax1.grid(True)
+
+# График корреляторов
+ax2.plot(times, correlators, label="Средний коррелятор", color="purple", linestyle="-", marker="o")
+ax2.set_xlabel("Время (startTime)")
+ax2.set_ylabel("Средний коррелятор")
+ax2.set_title("Корреляция с прошлым")
+ax2.legend()
+ax2.grid(True)
+
 plt.xticks(rotation=45)
-plt.grid(True)
 plt.tight_layout()
 plt.show()
