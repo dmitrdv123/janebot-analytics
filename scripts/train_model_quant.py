@@ -34,36 +34,87 @@ def compute_hamiltonian(df, current_idx, timeframe=1, lookback=5):
     volume_factor = volume / avg_volume if avg_volume != 0 else 1
     turnover_factor = turnover / avg_turnover if avg_turnover != 0 else 1
     
-    h_growth = volatility_factor * volume_factor
-    h_decline = volatility_factor * (2 - volume_factor)
-    h_stagnation = turnover_factor
-
+    T = volatility_factor / volume_factor if volume_factor != 0 else 1
+    T_c = 1
+    
+    omega_growth = volatility_factor * volume_factor
+    omega_decline = volatility_factor * (1 - volume_factor)
+    omega_stagnation = turnover_factor
+    
     H = np.zeros((3, 3), dtype=complex)
-    H[0, 0] = h_growth
-    H[1, 1] = h_decline
-    H[2, 2] = h_stagnation
+    H[0, 0] = omega_growth / 2
+    H[1, 1] = omega_decline / 2
+    H[2, 2] = omega_stagnation / 2
+    
+    J = 0.2 * volume_factor * (1 if T < T_c else 0.5)
+    H[0, 1] = H[1, 0] = -J
+    H[0, 2] = H[2, 0] = -J / 2
+    H[1, 2] = H[2, 1] = -J / 2
 
-    # Туннелирование: недиагональные элементы зависят от volume
-    tunneling_factor = 0.1 * volume_factor * volatility_factor
-    H[0, 1] = H[1, 0] = tunneling_factor  # Рост <-> Падение
-    H[0, 2] = H[2, 0] = tunneling_factor / 2  # Рост <-> Стагнация
-    H[1, 2] = H[2, 1] = tunneling_factor / 2  # Падение <-> Стагнация
-
-    noise_amplitude = 0.05 * (1 / math.log(timeframe + 1))
+    noise_amplitude = 0.05 * (1 / math.log(timeframe + 1)) * (1.2 if T > T_c else 1)
     noise = np.random.normal(0, noise_amplitude, (3, 3)) + 1j * np.random.normal(0, noise_amplitude, (3, 3))
     H += noise
     H = (H + H.conj().T) / 2
 
     return H / 1000
 
-def evolve_wave_function(prev_amps, H, turnover_factor, dt=1):
+def quantum_teleport_long_range(df, current_idx, prev_states, entangle_range=3, prev_error=0):
+    if not prev_states or current_idx <= 0:
+        return None
+    teleported_amps = np.zeros(3, dtype=complex)
+    total_weight = 0
+    alpha = 0.1  # Коэффициент затухания
+    
+    for k in range(1, min(entangle_range + 1, current_idx + 1)):
+        hist_idx = current_idx - k
+        if hist_idx < 0:
+            break
+        trend_strength = np.corrcoef(df["startTime"][max(0, hist_idx-lookback):hist_idx+1], 
+                                     df["closePrice"][max(0, hist_idx-lookback):hist_idx+1])[0, 1] if hist_idx > 0 else 0
+        weight = math.exp(-alpha * k) * abs(trend_strength)
+        teleported_amps += np.array(prev_states[hist_idx], dtype=complex) * weight
+        total_weight += weight
+    
+    if total_weight > 0:
+        teleported_amps /= total_weight
+        phase_shift = cmath.exp(1j * 0.01 * prev_error)
+        teleported_amps *= phase_shift
+        norm = math.sqrt(sum(abs(x)**2 for x in teleported_amps))
+        if norm > 0:
+            teleported_amps /= norm
+        return tuple(teleported_amps)
+    return None
+
+def tomography_initial_state(df, current_idx, lookback=5):
+    if current_idx <= 0:
+        return complex(1 / math.sqrt(3), 0), complex(1 / math.sqrt(3), 0), complex(1 / math.sqrt(3), 0)
+    
+    start_idx = max(0, current_idx - lookback)
+    hist_df = df.iloc[start_idx:current_idx]
+    if not hist_df.empty:
+        delta_p = df["closePrice"].iloc[current_idx-1] - df["closePrice"].iloc[current_idx-2] if current_idx > 1 else 0
+        growth_prob = max(delta_p / 100, 0)  # Нормализация на 100 USD
+        decline_prob = max(-delta_p / 100, 0)
+        stagnation_prob = math.exp(-abs(delta_p) / 100)
+        total = growth_prob + decline_prob + stagnation_prob
+        if total > 0:
+            growth_prob /= total
+            decline_prob /= total
+            stagnation_prob /= total
+        return (complex(math.sqrt(growth_prob), 0), 
+                complex(math.sqrt(decline_prob), 0), 
+                complex(math.sqrt(stagnation_prob), 0))
+    return complex(1 / math.sqrt(3), 0), complex(1 / math.sqrt(3), 0), complex(1 / math.sqrt(3), 0)
+
+def evolve_wave_function(prev_amps, H, turnover_factor, volume_factor, T, T_c, dt=1):
     psi = np.array(prev_amps, dtype=complex)
     U = expm(-1j * H * dt)
     
-    # Диффузия: добавляем сглаживание пропорционально turnover
-    D = 0.01 * turnover_factor  # Коэффициент диффузии
-    diffusion = D * (psi - np.roll(psi, 1))  # Примитивная аппроксимация ∇²ψ
-    psi = U @ psi - 1j * diffusion
+    gamma = (1 / volume_factor if volume_factor != 0 else 1) * math.exp(T - T_c)
+    decoherence_factor = math.exp(-gamma * dt)
+    psi *= decoherence_factor
+    
+    psi = U @ psi
     
     norm = math.sqrt(sum(abs(x)**2 for x in psi))
     if norm > 0:
@@ -71,7 +122,7 @@ def evolve_wave_function(prev_amps, H, turnover_factor, dt=1):
     
     return tuple(psi)
 
-def calculate_wave_function(df, current_idx, prev_amps=None, prev_error=0, timeframe=1, lookback=5):
+def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, timeframe=1, lookback=5, entangle_range=3):
     """Рассчитывает волновую функцию."""
     row = df.iloc[current_idx]
     open_price = row["openPrice"]
@@ -106,16 +157,25 @@ def calculate_wave_function(df, current_idx, prev_amps=None, prev_error=0, timef
         trend_strength = 0
 
     turnover_factor = turnover / avg_turnover if avg_turnover != 0 else 1
+    volume_factor = volume / avg_volume if avg_volume != 0 else 1
+    T = (range_price / avg_range if avg_range != 0 else 1) / volume_factor
+    T_c = 1
 
     # Начальные амплитуды (если нет предыдущих)
-    if prev_amps is None:
-        growth_amp = decline_amp = stagnation_amp = complex(1 / math.sqrt(3), 0)
+    if prev_states is None or current_idx not in prev_states:
+        growth_amp, decline_amp, stagnation_amp = tomography_initial_state(df, current_idx, lookback)
     else:
         # Эволюция от предыдущего состояния
         H = compute_hamiltonian(df, current_idx - 1, timeframe, lookback)
-        growth_amp, decline_amp, stagnation_amp = evolve_wave_function(prev_amps, H, turnover_factor)
+        growth_amp, decline_amp, stagnation_amp = evolve_wave_function(
+            prev_states[current_idx - 1], H, turnover_factor, volume_factor, T, T_c
+        )
+        teleported_amps = quantum_teleport_long_range(df, current_idx, prev_states, entangle_range, prev_error)
+        if teleported_amps:
+            growth_amp = 0.7 * growth_amp + 0.3 * teleported_amps[0]
+            decline_amp = 0.7 * decline_amp + 0.3 * teleported_amps[1]
+            stagnation_amp = 0.7 * stagnation_amp + 0.3 * teleported_amps[2]
 
-    # Корректировка амплитуд текущей свечой
     if price_change > 0:
         growth_amp += 0.4 if close_price == high_price else 0.3
         decline_amp += 0.1
@@ -170,13 +230,13 @@ def calculate_wave_function(df, current_idx, prev_amps=None, prev_error=0, timef
 
     return (growth_amp, decline_amp, stagnation_amp), (growth_prob, decline_prob, stagnation_prob), avg_range
 
-def predict_close_price(df, current_idx, prev_amps=None, prev_error=0, timeframe=1, ensemble_size=10):
+def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timeframe=1, ensemble_size=10, entangle_range=3):
     """Предсказывает closePrice."""
     lookback = max(5, int(60 / timeframe))
     row = df.iloc[current_idx]
     
     # Расчёт волновой функции
-    amps, probs, avg_range = calculate_wave_function(df, current_idx, prev_amps, prev_error, timeframe, lookback)
+    amps, probs, avg_range = calculate_wave_function(df, current_idx, prev_states, prev_error, timeframe, lookback, entangle_range)
     growth_amp, decline_amp, stagnation_amp = amps
     growth_prob, decline_prob, stagnation_prob = probs
 
@@ -223,23 +283,25 @@ if not all(col in df.columns for col in required_cols):
 # Прогноз квантовой модели
 timeframe = 1
 ensemble_size = 20
+entangle_range = 3
 expected_prices = []
 collapsed_prices = []
 ci_lowers = []
 ci_uppers = []
 actual_prices = df["closePrice"].tolist()[1:]
-times = df["startTime"].tolist()[:-1]  # Время для предсказания — момент начала свечи
-prev_amps = None
+times = df["startTime"].tolist()[:-1]
+prev_states = {}
 prev_error = 0
 
 for i in range(len(df) - 1):
-    expected_close, collapsed_mean, ci_lower, ci_upper, prev_amps = predict_close_price(
-        df, i, prev_amps, prev_error, timeframe, ensemble_size=ensemble_size
+    expected_close, collapsed_mean, ci_lower, ci_upper, amps = predict_close_price(
+        df, i, prev_states, prev_error, timeframe, ensemble_size=ensemble_size, entangle_range=entangle_range
     )
     expected_prices.append(expected_close)
     collapsed_prices.append(collapsed_mean)
     ci_lowers.append(ci_lower)
     ci_uppers.append(ci_upper)
+    prev_states[i] = amps
     prev_error = actual_prices[i] - collapsed_mean if i < len(actual_prices) else 0
 
 # Расчёт ошибок
@@ -261,7 +323,7 @@ plt.plot(times, collapsed_prices, label="Ансамбль closePrice (квант
 plt.fill_between(times, ci_lowers, ci_uppers, color="green", alpha=0.2, label="95% Доверительный интервал")
 plt.xlabel("Время (startTime)")
 plt.ylabel("Цена (USD)")
-plt.title(f"Сравнение моделей (timeframe={timeframe} мин, ensemble_size={ensemble_size})")
+plt.title(f"Сравнение с запутанностью на расстоянии и томографией (timeframe={timeframe} мин, ensemble_size={ensemble_size})")
 plt.legend()
 plt.xticks(rotation=45)
 plt.grid(True)
