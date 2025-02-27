@@ -303,7 +303,7 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
 
     return (growth_amp, decline_amp, stagnation_amp), (growth_prob, decline_prob, stagnation_prob), avg_range, entropy_factor, mean_correlator
 
-def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timeframe=1, ensemble_size=30, ensemble_size_traj=3):
+def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timeframe=1, ensemble_size=100, ensemble_size_traj=3):
     """Предсказывает closePrice."""
     lookback = 1000
     row = df.iloc[current_idx]
@@ -344,7 +344,24 @@ def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timefra
     ci_lower = collapsed_mean - 1.96 * collapsed_std * entropy_factor
     ci_upper = collapsed_mean + 1.96 * collapsed_std * entropy_factor
 
-    return expected_close, collapsed_mean, ci_lower, ci_upper, amps, mean_correlator
+    # Логика бота
+    signal = None
+    rmse_threshold = 70  # Увеличен с 46.59 до 50
+    current_close = row["closePrice"]
+    expected_change = abs(expected_close - current_close)
+    
+    # Фильтр по волатильности (средний размах за последние 10 свечей)
+    vol_lookback = min(10, current_idx)
+    recent_volatility = (df["highPrice"].iloc[max(0, current_idx-vol_lookback):current_idx+1] - 
+                         df["lowPrice"].iloc[max(0, current_idx-vol_lookback):current_idx+1]).mean()
+    
+    if expected_change > rmse_threshold and mean_correlator > 0.7 and recent_volatility > 50:  # Фильтр по коррелятору
+        if ci_lower > current_close:
+            signal = "Long"
+        elif ci_upper < current_close:
+            signal = "Short"
+
+    return expected_close, collapsed_mean, ci_lower, ci_upper, amps, mean_correlator, signal
 
 # Загрузка данных
 symbol = 'BTCUSDT'
@@ -356,22 +373,30 @@ required_cols = ["startTime", "openPrice", "highPrice", "lowPrice", "closePrice"
 if not all(col in df.columns for col in required_cols):
     raise ValueError("CSV-файл должен содержать колонки: " + ", ".join(required_cols))
 
-# Прогноз квантовой модели
+# Прогноз квантовой модели и тестирование бота
 timeframe = 1
-ensemble_size = 30  # Увеличено с 20
+ensemble_size = 100  # Увеличено с 20
 ensemble_size_traj = 3  # Уменьшено с 5
+random.seed(42)  # Фиксация случайности для стабильности
 expected_prices = []
 collapsed_prices = []
 ci_lowers = []
 ci_uppers = []
-actual_prices = df["closePrice"].tolist()[1:]
-times = df["startTime"].tolist()[:-1]
+actual_prices = df["closePrice"].tolist()[1:-1]  # Убрали последнюю свечу
+times = df["startTime"].tolist()[:-2]  # Убрали последние две свечи
 correlators = []
+signals = []
 prev_states = {}
 prev_error = 0
 
-for i in range(len(df) - 1):
-    expected_close, collapsed_mean, ci_lower, ci_upper, amps, mean_correlator = predict_close_price(
+long_signals = 0
+short_signals = 0
+long_correct = 0
+short_correct = 0
+total_profit = 0
+
+for i in range(len(df) - 2):  # Ограничен до len(df) - 2
+    expected_close, collapsed_mean, ci_lower, ci_upper, amps, mean_correlator, signal = predict_close_price(
         df, i, prev_states, prev_error, timeframe, ensemble_size=ensemble_size, ensemble_size_traj=ensemble_size_traj
     )
     expected_prices.append(expected_close)
@@ -379,10 +404,37 @@ for i in range(len(df) - 1):
     ci_lowers.append(ci_lower)
     ci_uppers.append(ci_upper)
     correlators.append(mean_correlator)
+    signals.append(signal)
     prev_states[i] = amps
     prev_error = actual_prices[i] - collapsed_mean if i < len(actual_prices) else 0
 
-# Расчёт ошибок
+    # Анализ сигналов бота с учётом стоп-лосса и тейк-профита
+    if signal == "Long":
+        long_signals += 1
+        next_price = df["closePrice"].iloc[i + 1]
+        entry_price = df["closePrice"].iloc[i]
+        profit = next_price - entry_price
+        stop_loss = max(-0.5 * abs(expected_close - entry_price), -30)
+        take_profit = max(2 * abs(expected_close - entry_price), 60)  # Динамический тейк-профит
+        if profit < -30:
+            profit = -30  # Стоп-лосс
+        total_profit += profit
+        if next_price > entry_price:
+            long_correct += 1
+    elif signal == "Short":
+        short_signals += 1
+        next_price = df["closePrice"].iloc[i + 1]
+        entry_price = df["closePrice"].iloc[i]
+        profit = entry_price - next_price
+        stop_loss = max(-0.5 * abs(expected_close - entry_price), -30)
+        take_profit = max(2 * abs(expected_close - entry_price), 60)  # Динамический тейк-профит
+        if profit < -30:
+            profit = -30  # Стоп-лосс
+        total_profit += profit
+        if next_price < entry_price:
+            short_correct += 1
+
+# Расчёт ошибок и метрик
 if expected_prices and actual_prices:
     mse_exp = sum((pred - actual) ** 2 for pred, actual in zip(expected_prices, actual_prices)) / len(expected_prices)
     rmse_exp = math.sqrt(mse_exp)
@@ -390,6 +442,31 @@ if expected_prices and actual_prices:
     rmse_col = math.sqrt(mse_col)
     print(f"Ошибка квантовой модели (RMSE, ожидаемое): {rmse_exp:.2f} USD")
     print(f"Ошибка квантовой модели (RMSE, ансамбль): {rmse_col:.2f} USD")
+
+    avg_candle_range = (df["highPrice"] - df["lowPrice"]).mean()
+    print(f"Средний размах свечей (highPrice - lowPrice): {avg_candle_range:.2f} USD")
+
+    price_changes = [abs(df["closePrice"].iloc[i] - df["closePrice"].iloc[i-1]) for i in range(1, len(df))]
+    avg_price_change = np.mean(price_changes)
+    print(f"Среднее абсолютное изменение цены (|closePrice[i] - closePrice[i-1]|): {avg_price_change:.2f} USD")
+
+    std_close_price = df["closePrice"].std()
+    print(f"Стандартное отклонение closePrice: {std_close_price:.2f} USD")
+
+    # Результаты бота
+    total_signals = long_signals + short_signals
+    print(f"\nРезультаты бота:")
+    print(f"Всего сигналов: {total_signals}")
+    print(f"Сигналов Long: {long_signals}")
+    print(f"Точных Long: {long_correct} ({long_correct/long_signals*100:.2f}%)" if long_signals > 0 else f"Точных Long: {long_correct} (0.00%)")
+    print(f"Сигналов Short: {short_signals}")
+    print(f"Точных Short: {short_correct} ({short_correct/short_signals*100:.2f}%)" if short_signals > 0 else f"Точных Short: {short_correct} (0.00%)")
+    total_correct = long_correct + short_correct
+    accuracy = total_correct / total_signals * 100 if total_signals > 0 else 0
+    print(f"Общая точность: {accuracy:.2f}%")
+    print(f"Общая прибыль/убыток: {total_profit:.2f} USD")
+    avg_profit_per_trade = total_profit / total_signals if total_signals > 0 else 0
+    print(f"Средняя прибыль на сделку: {avg_profit_per_trade:.2f} USD")
 else:
     print("Недостаточно данных для расчёта ошибки")
 
@@ -402,7 +479,7 @@ ax1.plot(times, expected_prices, label="Ожидаемый closePrice (кван�
 ax1.plot(times, collapsed_prices, label="Ансамбль closePrice (квант)", color="green", linestyle="-.", marker="^")
 ax1.fill_between(times, ci_lowers, ci_uppers, color="green", alpha=0.2, label="95% Доверительный интервал (с энтропией)")
 ax1.set_ylabel("Цена (USD)")
-ax1.set_title(f"Сравнение цен (timeframe={timeframe} мин, ensemble_size={ensemble_size}, traj={ensemble_size_traj})")
+ax1.set_title(f"Сравнение цен (timeframe={timeframe} мин, ensemble_size={ensemble_size}, traj={ensemble_size_traj}, lookback=1000))")
 ax1.legend()
 ax1.grid(True)
 
