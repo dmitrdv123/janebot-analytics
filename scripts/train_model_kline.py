@@ -54,7 +54,7 @@ def prepare_features_kline(df):
 
 if __name__ == '__main__':
   symbol = 'BTCUSDT'
-  folder_features_kline = f'features/kline/{symbol}/1'
+  folder_features_kline = f'features/kline/{symbol}/5'
 
   df_features_kline = pd.read_csv(f'{folder_features_kline}/features.csv')
 
@@ -171,6 +171,8 @@ if __name__ == '__main__':
   print(f"Средний размах свечей (highPrice - lowPrice): {avg_candle_range:.2f} USD")
 
   # Bot logic
+  fee_open = 0.0002
+  fee_close = 0.0002
   rmse_threshold = 70
   correlator_threshold = 0.7
   volatility_threshold = 50
@@ -210,20 +212,20 @@ if __name__ == '__main__':
     if signal == "Long":
       long_signals += 1
       next_price = next_row['closePrice']
-      profit = next_price - current_close
+      profit = next_price - current_close - fee_open * current_close - fee_close * next_price
       stop_loss = max(-0.5 * expected_change, -30)
       if profit < stop_loss:
-        profit = stop_loss
+        profit = stop_loss - fee_open * current_close - fee_close * next_price
       total_profit += profit
       if next_price > current_close:
         long_correct += 1
     elif signal == "Short":
       short_signals += 1
       next_price = next_row['closePrice']
-      profit = current_close - next_price
+      profit = current_close - next_price - fee_open * current_close - fee_close * next_price
       stop_loss = max(-0.5 * expected_change, -30)
       if profit < stop_loss:
-        profit = stop_loss
+        profit = stop_loss - fee_open * current_close - fee_close * next_price
       total_profit += profit
       if next_price < current_close:
         short_correct += 1

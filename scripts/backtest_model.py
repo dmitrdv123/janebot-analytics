@@ -86,7 +86,7 @@ if __name__ == '__main__':
   model, scalers = load_model_and_scalers()
 
   # Load data
-  df_data = load_and_prepare_data()
+  df_data = load_and_prepare_data(symbol='BTCUSDT', interval=5)
   
   # Define feature columns
   input_columns = [

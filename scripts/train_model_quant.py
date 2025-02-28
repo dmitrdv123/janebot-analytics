@@ -5,6 +5,7 @@ import cmath
 import random
 import numpy as np
 from scipy.linalg import expm, eigvals
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from utils import load_data
 
@@ -12,7 +13,7 @@ def sigmoid(x):
     """Сигмоидная функция для нормализации."""
     return 1 / (1 + math.exp(-x))
 
-def compute_hamiltonian(df, current_idx, timeframe=1, lookback=1000):
+def compute_hamiltonian(df, current_idx, timeframe=1, lookback=100):
     """Рассчитывает гамильтониан на основе рыночных данных."""
     row = df.iloc[current_idx]
     range_price = row["highPrice"] - row["lowPrice"]
@@ -84,7 +85,7 @@ def compute_entropy(ensemble_amps):
     S = -sum(eig * math.log(eig) for eig in eigenvalues if eig > 0)
     return S
 
-def holographic_convolution(df, current_idx, prev_states, lookback=1000):
+def holographic_convolution(df, current_idx, prev_states, lookback=100):
     if not prev_states or current_idx <= 0:
         return None
     holographic_amps = np.zeros(3, dtype=complex)  # 3 для SUSY
@@ -111,7 +112,7 @@ def holographic_convolution(df, current_idx, prev_states, lookback=1000):
         return tuple(holographic_amps)
     return None
 
-def tomography_initial_state(df, current_idx, lookback=1000):
+def tomography_initial_state(df, current_idx, lookback=100):
     if current_idx <= 0:
         return tuple([complex(1 / math.sqrt(3), 0)] * 3)  # 3 для SUSY
     
@@ -157,7 +158,7 @@ def evolve_wave_function(prev_amps, H, turnover_factor, volume_factor, T, T_c, a
     
     return tuple(psi)
 
-def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, timeframe=1, lookback=1000, ensemble_size_traj=3):
+def calculate_wave_function(df, current_idx, prev_states, prev_error=0, timeframe=1, lookback=100):
     row = df.iloc[current_idx]
     open_price = row["openPrice"]
     high_price = row["highPrice"]
@@ -195,92 +196,84 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
     T = (range_price / avg_range if avg_range != 0 else 1) / volume_factor
     T_c = 1
 
-    ensemble_amps = []
-    ensemble_correlators = []
-    for traj in range(ensemble_size_traj):
-        if prev_states is None or current_idx not in prev_states:
-            growth_amp, decline_amp, stagnation_amp = tomography_initial_state(df, current_idx, lookback)
-        else:
-            H = compute_hamiltonian(df, current_idx - 1, timeframe, lookback, noise_seed=traj)
-            growth_amp, decline_amp, stagnation_amp = evolve_wave_function(
-                prev_states[current_idx - 1], H, turnover_factor, volume_factor, T, T_c, avg_price_change, avg_range
+    # Используем prev_states как словарь, проверяем наличие предыдущего состояния
+    if current_idx == 0 or current_idx - 1 not in prev_states:
+        growth_amp, decline_amp, stagnation_amp = tomography_initial_state(df, current_idx, lookback)
+    else:
+        H = compute_hamiltonian(df, current_idx - 1, timeframe, lookback)
+        growth_amp, decline_amp, stagnation_amp = evolve_wave_function(
+            prev_states[current_idx - 1], H, turnover_factor, volume_factor, T, T_c, avg_price_change, avg_range
+        )
+        holographic_amps = holographic_convolution(df, current_idx, prev_states, lookback)
+        if holographic_amps:
+            growth_amp = 0.5 * growth_amp + 0.5 * holographic_amps[0]
+            decline_amp = 0.5 * decline_amp + 0.5 * holographic_amps[1]
+            stagnation_amp = 0.5 * stagnation_amp + 0.5 * holographic_amps[2]
+
+    if price_change > 0:
+        growth_amp += 0.4 if close_price == high_price else 0.3
+        decline_amp += 0.1
+        stagnation_amp += 0.2
+    elif price_change < 0:
+        decline_amp += 0.4 if close_price == low_price else 0.3
+        growth_amp += 0.1
+        stagnation_amp += 0.2
+    else:
+        stagnation_amp += 0.5
+        growth_amp += 0.25
+        decline_amp += 0.25
+
+    if avg_range != 0 and avg_volume != 0:
+        phase = sigmoid(avg_price_change / avg_range + (turnover / avg_volume - 1) + 0.01 * prev_error) * 2 * math.pi
+    else:
+        phase = 0
+    interference_factor = 0.05 * cmath.exp(1j * phase)
+    if avg_price_change > 0:
+        growth_amp += interference_factor
+    elif avg_price_change < 0:
+        decline_amp += interference_factor
+
+    entanglement_boost = abs(trend_strength) * (volume / avg_volume) * 0.05
+    if trend_strength > 0:
+        growth_amp += entanglement_boost * cmath.exp(1j * phase)
+        decline_amp -= entanglement_boost / 2
+    elif trend_strength < 0:
+        decline_amp += entanglement_boost * cmath.exp(1j * phase)
+        growth_amp -= entanglement_boost / 2
+
+    if range_percent < 0.05 or range_price < (avg_range * 0.8):
+        stagnation_amp += 0.3
+    elif range_percent > 0.2 or range_price > (avg_range * 1.2):
+        growth_amp += 0.15
+        decline_amp += 0.15
+
+    # Корреляторы с прошлыми состояниями
+    correlator_sum = 0
+    correlator_count = 0
+    for k in range(start_idx, current_idx):
+        if k in prev_states:
+            correlator = compute_correlator(
+                (growth_amp, decline_amp, stagnation_amp),
+                prev_states[k]
             )
-            holographic_amps = holographic_convolution(df, current_idx, prev_states, lookback)
-            if holographic_amps:
-                growth_amp = 0.5 * growth_amp + 0.5 * holographic_amps[0]
-                decline_amp = 0.5 * decline_amp + 0.5 * holographic_amps[1]
-                stagnation_amp = 0.5 * stagnation_amp + 0.5 * holographic_amps[2]
+            correlator_sum += correlator
+            correlator_count += 1
+    avg_correlator = correlator_sum / correlator_count if correlator_count > 0 else 0.5
 
-        if price_change > 0:
-            growth_amp += 0.4 if close_price == high_price else 0.3
-            decline_amp += 0.1
-            stagnation_amp += 0.2
-        elif price_change < 0:
-            decline_amp += 0.4 if close_price == low_price else 0.3
-            growth_amp += 0.1
-            stagnation_amp += 0.2
-        else:
-            stagnation_amp += 0.5
-            growth_amp += 0.25
-            decline_amp += 0.25
+    # Усиление амплитуд пропорционально корреляции
+    correlation_boost = 0.1 * avg_correlator
+    growth_amp *= (1 + correlation_boost)
+    decline_amp *= (1 + correlation_boost)
+    stagnation_amp *= (1 + correlation_boost)
 
-        if avg_range != 0 and avg_volume != 0:
-            phase = sigmoid(avg_price_change / avg_range + (turnover / avg_volume - 1) + 0.01 * prev_error) * 2 * math.pi
-        else:
-            phase = 0
-        interference_factor = 0.05 * cmath.exp(1j * phase)  # Уменьшено с 0.15
-        if avg_price_change > 0:
-            growth_amp += interference_factor
-        elif avg_price_change < 0:
-            decline_amp += interference_factor
+    amps = np.array([growth_amp, decline_amp, stagnation_amp], dtype=complex)
+    norm = math.sqrt(sum(abs(x)**2 for x in amps))
+    if norm > 0:
+        amps /= norm
+    growth_amp, decline_amp, stagnation_amp = amps
 
-        entanglement_boost = abs(trend_strength) * (volume / avg_volume) * 0.05  # Уменьшено с 0.2
-        if trend_strength > 0:
-            growth_amp += entanglement_boost * cmath.exp(1j * phase)
-            decline_amp -= entanglement_boost / 2
-        elif trend_strength < 0:
-            decline_amp += entanglement_boost * cmath.exp(1j * phase)
-            growth_amp -= entanglement_boost / 2
-
-        if range_percent < 0.05 or range_price < (avg_range * 0.8):
-            stagnation_amp += 0.3
-        elif range_percent > 0.2 or range_price > (avg_range * 1.2):
-            growth_amp += 0.15
-            decline_amp += 0.15
-
-        # Корреляторы с прошлыми состояниями
-        correlator_sum = 0
-        correlator_count = 0
-        for k in range(start_idx, current_idx):
-            if k in prev_states:
-                correlator = compute_correlator(
-                    (growth_amp, decline_amp, stagnation_amp),
-                    prev_states[k]
-                )
-                correlator_sum += correlator
-                correlator_count += 1
-        avg_correlator = correlator_sum / correlator_count if correlator_count > 0 else 0.5
-        ensemble_correlators.append(avg_correlator)
-        
-        # Усиление амплитуд пропорционально корреляции
-        correlation_boost = 0.1 * avg_correlator
-        growth_amp *= (1 + correlation_boost)
-        decline_amp *= (1 + correlation_boost)
-        stagnation_amp *= (1 + correlation_boost)
-
-        amps = np.array([growth_amp, decline_amp, stagnation_amp], dtype=complex)
-        norm = math.sqrt(sum(abs(x)**2 for x in amps))
-        if norm > 0:
-            amps /= norm
-        ensemble_amps.append(amps)
-
-    # Усреднение по ансамблю
-    mean_amps = np.mean(ensemble_amps, axis=0)
-    growth_amp, decline_amp, stagnation_amp = mean_amps
-    
-    mean_correlator = np.mean(ensemble_correlators) if ensemble_correlators else 0.5
     # Энтропия фон Неймана
-    entropy = compute_entropy(ensemble_amps)
+    entropy = compute_entropy(amps)
     entropy_factor = 1 - min(entropy / math.log(3), 1)
 
     growth_prob = abs(growth_amp)**2
@@ -292,25 +285,25 @@ def calculate_wave_function(df, current_idx, prev_states=None, prev_error=0, tim
         decline_prob /= total
         stagnation_prob /= total
     # Корректировка вероятностей с коррелятором
-    growth_prob *= (1 + 0.1 * mean_correlator)
-    decline_prob *= (1 + 0.1 * mean_correlator)
-    stagnation_prob *= (1 + 0.1 * mean_correlator)
+    growth_prob *= (1 + 0.1 * avg_correlator)
+    decline_prob *= (1 + 0.1 * avg_correlator)
+    stagnation_prob *= (1 + 0.1 * avg_correlator)
     total = growth_prob + decline_prob + stagnation_prob
     if total > 0:
         growth_prob /= total
         decline_prob /= total
         stagnation_prob /= total
 
-    return (growth_amp, decline_amp, stagnation_amp), (growth_prob, decline_prob, stagnation_prob), avg_range, entropy_factor, mean_correlator
+    return (growth_amp, decline_amp, stagnation_amp), (growth_prob, decline_prob, stagnation_prob), avg_range, entropy_factor, avg_correlator
 
-def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timeframe=1, ensemble_size=100, ensemble_size_traj=3):
+def predict_close_price(df, current_idx, prev_states, prev_error=0, timeframe=1, ensemble_size=100):
     """Предсказывает closePrice."""
-    lookback = 1000
+    lookback = 100
     row = df.iloc[current_idx]
     
     # Расчёт волновой функции
     amps, probs, avg_range, entropy_factor, mean_correlator = calculate_wave_function(
-        df, current_idx, prev_states, prev_error, timeframe, lookback, ensemble_size_traj=ensemble_size_traj
+        df, current_idx, prev_states, prev_error, timeframe, lookback
     )
     growth_amp, decline_amp, stagnation_amp = amps
     growth_prob, decline_prob, stagnation_prob = probs
@@ -346,7 +339,7 @@ def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timefra
 
     # Логика бота
     signal = None
-    rmse_threshold = 70  # Увеличен с 46.59 до 50
+    rmse_threshold = 50
     current_close = row["closePrice"]
     expected_change = abs(expected_close - current_close)
     
@@ -354,7 +347,7 @@ def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timefra
     vol_lookback = min(10, current_idx)
     recent_volatility = (df["highPrice"].iloc[max(0, current_idx-vol_lookback):current_idx+1] - 
                          df["lowPrice"].iloc[max(0, current_idx-vol_lookback):current_idx+1]).mean()
-    
+
     if expected_change > rmse_threshold and mean_correlator > 0.7 and recent_volatility > 50:  # Фильтр по коррелятору
         if ci_lower > current_close:
             signal = "Long"
@@ -366,24 +359,25 @@ def predict_close_price(df, current_idx, prev_states=None, prev_error=0, timefra
 # Загрузка данных
 symbol = 'BTCUSDT'
 interval = '1'  # Kline interval (1m, 5m, 15m, etc.)
-df = load_data(f'data/kline/{symbol}/{interval}')
+df_kline = load_data(f'data/kline/{symbol}/{interval}')
 
 # Проверка колонок
 required_cols = ["startTime", "openPrice", "highPrice", "lowPrice", "closePrice", "volume", "turnover"]
-if not all(col in df.columns for col in required_cols):
-    raise ValueError("CSV-файл должен содержать колонки: " + ", ".join(required_cols))
+if not all(col in df_kline.columns for col in required_cols):
+    raise ValueError("CSV-файл Kline должен содержать колонки: " + ", ".join(required_cols))
 
 # Прогноз квантовой модели и тестирование бота
+fee_open = 0.0002
+fee_close = 0.0002
 timeframe = 1
 ensemble_size = 100  # Увеличено с 20
-ensemble_size_traj = 3  # Уменьшено с 5
 random.seed(42)  # Фиксация случайности для стабильности
 expected_prices = []
 collapsed_prices = []
 ci_lowers = []
 ci_uppers = []
-actual_prices = df["closePrice"].tolist()[1:-1]  # Убрали последнюю свечу
-times = df["startTime"].tolist()[:-2]  # Убрали последние две свечи
+actual_prices = df_kline["closePrice"].tolist()[1:-1]  # Убрали последнюю свечу
+times = df_kline["startTime"].tolist()[:-2]  # Убрали последние две свечи
 correlators = []
 signals = []
 prev_states = {}
@@ -395,9 +389,9 @@ long_correct = 0
 short_correct = 0
 total_profit = 0
 
-for i in range(len(df) - 2):  # Ограничен до len(df) - 2
+for i in range(len(df_kline) - 2):  # Ограничен до len(df) - 2
     expected_close, collapsed_mean, ci_lower, ci_upper, amps, mean_correlator, signal = predict_close_price(
-        df, i, prev_states, prev_error, timeframe, ensemble_size=ensemble_size, ensemble_size_traj=ensemble_size_traj
+        df_kline, i, prev_states, prev_error, timeframe, ensemble_size=ensemble_size
     )
     expected_prices.append(expected_close)
     collapsed_prices.append(collapsed_mean)
@@ -411,46 +405,48 @@ for i in range(len(df) - 2):  # Ограничен до len(df) - 2
     # Анализ сигналов бота с учётом стоп-лосса и тейк-профита
     if signal == "Long":
         long_signals += 1
-        next_price = df["closePrice"].iloc[i + 1]
-        entry_price = df["closePrice"].iloc[i]
-        profit = next_price - entry_price
+        next_price = df_kline["closePrice"].iloc[i + 1]
+        entry_price = df_kline["closePrice"].iloc[i]
+        profit = next_price - entry_price - fee_open * entry_price - fee_close * next_price
         stop_loss = max(-0.5 * abs(expected_close - entry_price), -30)
-        take_profit = max(2 * abs(expected_close - entry_price), 60)  # Динамический тейк-профит
         if profit < -30:
-            profit = -30  # Стоп-лосс
+            profit = -30 - fee_open * entry_price - fee_close * next_price  # Стоп-лосс
         total_profit += profit
         if next_price > entry_price:
             long_correct += 1
     elif signal == "Short":
         short_signals += 1
-        next_price = df["closePrice"].iloc[i + 1]
-        entry_price = df["closePrice"].iloc[i]
-        profit = entry_price - next_price
+        next_price = df_kline["closePrice"].iloc[i + 1]
+        entry_price = df_kline["closePrice"].iloc[i]
+        profit = entry_price - next_price - fee_open * entry_price - fee_close * next_price
         stop_loss = max(-0.5 * abs(expected_close - entry_price), -30)
-        take_profit = max(2 * abs(expected_close - entry_price), 60)  # Динамический тейк-профит
         if profit < -30:
-            profit = -30  # Стоп-лосс
+            profit = -30 - fee_open * entry_price - fee_close * next_price # Стоп-лосс
         total_profit += profit
         if next_price < entry_price:
             short_correct += 1
 
 # Расчёт ошибок и метрик
 if expected_prices and actual_prices:
-    mse_exp = sum((pred - actual) ** 2 for pred, actual in zip(expected_prices, actual_prices)) / len(expected_prices)
+    mse_exp = mean_squared_error(actual_prices, expected_prices)
     rmse_exp = math.sqrt(mse_exp)
-    mse_col = sum((pred - actual) ** 2 for pred, actual in zip(collapsed_prices, actual_prices)) / len(collapsed_prices)
+    mae_exp = mean_absolute_error(actual_prices, expected_prices)
+    mse_col = mean_squared_error(actual_prices, collapsed_prices)
     rmse_col = math.sqrt(mse_col)
+    mae_col = mean_absolute_error(actual_prices, collapsed_prices)
     print(f"Ошибка квантовой модели (RMSE, ожидаемое): {rmse_exp:.2f} USD")
     print(f"Ошибка квантовой модели (RMSE, ансамбль): {rmse_col:.2f} USD")
+    print(f"Mean Absolute Error (MAE, ожидаемое): {mae_exp:.2f} USD")
+    print(f"Mean Absolute Error (MAE, ансамбль): {mae_col:.2f} USD")
 
-    avg_candle_range = (df["highPrice"] - df["lowPrice"]).mean()
+    avg_candle_range = (df_kline["highPrice"] - df_kline["lowPrice"]).mean()
     print(f"Средний размах свечей (highPrice - lowPrice): {avg_candle_range:.2f} USD")
 
-    price_changes = [abs(df["closePrice"].iloc[i] - df["closePrice"].iloc[i-1]) for i in range(1, len(df))]
+    price_changes = [abs(df_kline["closePrice"].iloc[i] - df_kline["closePrice"].iloc[i-1]) for i in range(1, len(df_kline))]
     avg_price_change = np.mean(price_changes)
     print(f"Среднее абсолютное изменение цены (|closePrice[i] - closePrice[i-1]|): {avg_price_change:.2f} USD")
 
-    std_close_price = df["closePrice"].std()
+    std_close_price = df_kline["closePrice"].std()
     print(f"Стандартное отклонение closePrice: {std_close_price:.2f} USD")
 
     # Результаты бота
@@ -479,7 +475,7 @@ ax1.plot(times, expected_prices, label="Ожидаемый closePrice (кван�
 ax1.plot(times, collapsed_prices, label="Ансамбль closePrice (квант)", color="green", linestyle="-.", marker="^")
 ax1.fill_between(times, ci_lowers, ci_uppers, color="green", alpha=0.2, label="95% Доверительный интервал (с энтропией)")
 ax1.set_ylabel("Цена (USD)")
-ax1.set_title(f"Сравнение цен (timeframe={timeframe} мин, ensemble_size={ensemble_size}, traj={ensemble_size_traj}, lookback=1000))")
+ax1.set_title(f"Сравнение цен (timeframe={timeframe} мин, ensemble_size={ensemble_size}, lookback=100))")
 ax1.legend()
 ax1.grid(True)
 
