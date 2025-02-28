@@ -87,7 +87,7 @@ if __name__ == '__main__':
 
   # Load data
   df_data = load_and_prepare_data(symbol='BTCUSDT', interval=5)
-  
+
   # Define feature columns
   input_columns = [
     'openPrice', 
@@ -120,49 +120,49 @@ if __name__ == '__main__':
     'Stochastic_D', 
     'ROC_14',
   ]
-  
+
   # Target variable (future relative price change)
   target_column = 'futureClosePrice'
 
   # Lists to store results
   actual_values = []
   predicted_values = []
-  
+
   window_size = 16
   step_size = 1
 
   # Sliding window backtest
   for start_idx in range(0, len(df_data) - window_size, step_size):
     end_idx = start_idx + window_size + 1  # +1 to include future value
-    
+
     # Extract window
     df_window = df_data.iloc[start_idx:end_idx].copy()
-    
+
     # Calculate features
     df_features = calc_features_kline_based(df_window)
-    
+
     df_features_scaled = prepare_features_kline(df_features, scalers)
-    
+
     if len(df_features) < 1:  # Skip if window is too small after dropping NaNs
       continue
-    
+
     # Prepare input data
     X = df_features[input_columns].values
     y = df_features[target_column].values
-    
+
     # Convert to proper float type
     X = np.array(X, dtype=np.float32)  # Ensure it's a NumPy array with float32
     y = np.array(y, dtype=np.float32)  # Ensure target is also float32
-    
+
     # Reshape data for LSTM (samples, time steps, features)
     X = X.reshape(X.shape[0], 1, X.shape[1])
-      
+
     # Predict
     y_pred = model.predict(X).flatten()
-    
+
     predicted_values.extend(y_pred)
     actual_values.extend(y)
-    
+
     # Calculate and print errors in each iteration
     mse = mean_squared_error([actual_values[-1]], [predicted_values[-1]])
     mae = mean_absolute_error([actual_values[-1]], [predicted_values[-1]])
