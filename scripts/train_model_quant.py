@@ -339,7 +339,7 @@ def predict_close_price(df, current_idx, prev_states, prev_error=0, timeframe=1,
 
     # Логика бота
     signal = None
-    rmse_threshold = 50
+    rmse_threshold = 20
     current_close = row["closePrice"]
     expected_change = abs(expected_close - current_close)
     
@@ -358,7 +358,7 @@ def predict_close_price(df, current_idx, prev_states, prev_error=0, timeframe=1,
 
 # Загрузка данных
 symbol = 'BTCUSDT'
-interval = '1'  # Kline interval (1m, 5m, 15m, etc.)
+interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
 df_kline = load_data(f'data/kline/{symbol}/{interval}')
 
 # Проверка колонок
@@ -407,10 +407,10 @@ for i in range(len(df_kline) - 2):  # Ограничен до len(df) - 2
         long_signals += 1
         next_price = df_kline["closePrice"].iloc[i + 1]
         entry_price = df_kline["closePrice"].iloc[i]
-        profit = next_price - entry_price - fee_open * entry_price - fee_close * next_price
+        profit = next_price - entry_price 
         stop_loss = max(-0.5 * abs(expected_close - entry_price), -30)
         if profit < -30:
-            profit = -30 - fee_open * entry_price - fee_close * next_price  # Стоп-лосс
+            profit = -30 # Стоп-лосс
         total_profit += profit
         if next_price > entry_price:
             long_correct += 1
@@ -418,10 +418,10 @@ for i in range(len(df_kline) - 2):  # Ограничен до len(df) - 2
         short_signals += 1
         next_price = df_kline["closePrice"].iloc[i + 1]
         entry_price = df_kline["closePrice"].iloc[i]
-        profit = entry_price - next_price - fee_open * entry_price - fee_close * next_price
+        profit = entry_price - next_price 
         stop_loss = max(-0.5 * abs(expected_close - entry_price), -30)
         if profit < -30:
-            profit = -30 - fee_open * entry_price - fee_close * next_price # Стоп-лосс
+            profit = -30  # Стоп-лосс
         total_profit += profit
         if next_price < entry_price:
             short_correct += 1

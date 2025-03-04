@@ -74,111 +74,94 @@ def calc_features_premium_index_price_kline(symbol, interval):
 
 def calc_features_order_book(symbol):
   def process_order_book(file_path, top_n_levels=20):
-      '''
-      Processes a large order book file line by line and extracts relevant features including VWAP and volume-based metrics.
+    '''
+    Processes a large order book file line by line and extracts relevant features including VWAP and volume-based metrics.
 
-      Args:
-      - file_path (str): Path to the order book text file.
-      - top_n_levels (int): Number of top levels to consider for depth and imbalance.
+    Args:
+    - file_path (str): Path to the order book text file.
+    - top_n_levels (int): Number of top levels to consider for depth and imbalance.
 
-      Returns:
-      - pd.DataFrame: DataFrame with extracted features.
-      '''
+    Returns:
+    - pd.DataFrame: DataFrame with extracted features.
+    '''
+    features = []
+    cumulative_delta_volume = 0  # Initialize CDV
 
-      features = []
-      cumulative_delta_volume = 0  # Initialize CDV
+    with open(file_path, 'r') as file:
+      for line in file:
+        try:
+          order_book = json.loads(line.strip())
+          ts = order_book['ts']  # Timestamp
+          asks = [(float(price), float(qty)) for price, qty in order_book['data']['a']]
+          bids = [(float(price), float(qty)) for price, qty in order_book['data']['b']]
 
-      with open(file_path, 'r') as file:
-          for line in file:
-              try:
-                  order_book = json.loads(line.strip())  # Load JSON from each line
-                  ts = order_book['ts']  # Timestamp
-                  asks = order_book['data']['a']  # Ask side
-                  bids = order_book['data']['b']  # Bid side
+          if not asks or not bids:
+            continue
 
-                  # Convert string prices and quantities to floats
-                  asks = [(float(price), float(qty)) for price, qty in asks]
-                  bids = [(float(price), float(qty)) for price, qty in bids]
+          best_ask_price, best_ask_qty = asks[0]
+          best_bid_price, best_bid_qty = bids[0]
+          mid_price = (best_ask_price + best_bid_price) / 2
+          spread = best_ask_price - best_bid_price
+          relative_spread = spread / mid_price if mid_price != 0 else 0
 
-                  # Ensure there are valid bids and asks
-                  if not asks or not bids:
-                      continue
+          total_best_ask_volume = sum(qty for _, qty in asks[:top_n_levels])
+          total_best_bid_volume = sum(qty for _, qty in bids[:top_n_levels])
+          market_depth_ask = total_best_ask_volume
+          market_depth_bid = total_best_bid_volume
+          total_volume = market_depth_ask + market_depth_bid
+          order_book_imbalance = (market_depth_bid - market_depth_ask) / total_volume if total_volume != 0 else 0
 
-                  # Best Ask & Best Bid
-                  best_ask_price, best_ask_qty = asks[0]
-                  best_bid_price, best_bid_qty = bids[0]
+          vwap_ask = sum(price * qty for price, qty in asks[:top_n_levels]) / total_best_ask_volume if total_best_ask_volume > 0 else best_ask_price
+          vwap_bid = sum(price * qty for price, qty in bids[:top_n_levels]) / total_best_bid_volume if total_best_bid_volume > 0 else best_bid_price
+          vwap_total = (vwap_ask + vwap_bid) / 2
 
-                  # Mid-price
-                  mid_price = (best_ask_price + best_bid_price) / 2
+          volume_imbalance_ratio = (total_best_bid_volume - total_best_ask_volume) / (total_best_bid_volume + total_best_ask_volume) if (total_best_bid_volume + total_best_ask_volume) != 0 else 0
+          delta_volume = total_best_bid_volume - total_best_ask_volume
+          cumulative_delta_volume += delta_volume
+          liquidity_pressure_ratio = np.log1p(total_best_bid_volume) - np.log1p(total_best_ask_volume)
 
-                  # Spread and Relative Spread
-                  spread = best_ask_price - best_bid_price
-                  relative_spread = spread / mid_price if mid_price != 0 else 0
+          ask_sizes = [qty for _, qty in asks[:top_n_levels]]
+          bid_sizes = [qty for _, qty in bids[:top_n_levels]]
+          mean_ask_size = np.mean(ask_sizes) if ask_sizes else 0
+          mean_bid_size = np.mean(bid_sizes) if bid_sizes else 0
+          std_ask_size = np.std(ask_sizes) if ask_sizes else 0
+          std_bid_size = np.std(bid_sizes) if bid_sizes else 0
 
-                  # Total volume at best bid & ask
-                  total_best_ask_volume = sum(qty for _, qty in asks[:top_n_levels])
-                  total_best_bid_volume = sum(qty for _, qty in bids[:top_n_levels])
+          order_flow_imbalance = total_best_bid_volume - total_best_ask_volume  # Simplified OFI
+          depth_ratio = market_depth_bid / market_depth_ask if market_depth_ask != 0 else 1
+          price_level_count_ask = len(set(price for price, _ in asks[:top_n_levels]))
+          price_level_count_bid = len(set(price for price, _ in bids[:top_n_levels]))
 
-                  # Market Depth (sum of top N levels' volume)
-                  market_depth_ask = sum(qty for _, qty in asks[:top_n_levels])
-                  market_depth_bid = sum(qty for _, qty in bids[:top_n_levels])
+          features.append({
+            'timestamp': ts,
+            'mid_price': mid_price,
+            'spread': spread,
+            'relative_spread': relative_spread,
+            'total_best_ask_volume': total_best_ask_volume,
+            'total_best_bid_volume': total_best_bid_volume,
+            'market_depth_ask': market_depth_ask,
+            'market_depth_bid': market_depth_bid,
+            'order_book_imbalance': order_book_imbalance,
+            'vwap_ask': vwap_ask,
+            'vwap_bid': vwap_bid,
+            'vwap_total': vwap_total,
+            'volume_imbalance_ratio': volume_imbalance_ratio,
+            'cumulative_delta_volume': cumulative_delta_volume,
+            'liquidity_pressure_ratio': liquidity_pressure_ratio,
+            'mean_ask_size': mean_ask_size,
+            'mean_bid_size': mean_bid_size,
+            'std_ask_size': std_ask_size,
+            'std_bid_size': std_bid_size,
+            'order_flow_imbalance': order_flow_imbalance,
+            'depth_ratio': depth_ratio,
+            'price_level_count_ask': price_level_count_ask,
+            'price_level_count_bid': price_level_count_bid
+          })
 
-                  # Order Book Imbalance (OBI)
-                  total_volume = market_depth_ask + market_depth_bid
-                  order_book_imbalance = (market_depth_bid - market_depth_ask) / total_volume if total_volume != 0 else 0
+        except (json.JSONDecodeError, ValueError, IndexError) as e:
+          print(f'Skipping line due to error: {e}')
 
-                  # VWAP Calculation (Using Top N levels)
-                  vwap_ask = sum(price * qty for price, qty in asks[:top_n_levels]) / total_best_ask_volume if total_best_ask_volume > 0 else best_ask_price
-                  vwap_bid = sum(price * qty for price, qty in bids[:top_n_levels]) / total_best_bid_volume if total_best_bid_volume > 0 else best_bid_price
-                  vwap_total = (vwap_ask + vwap_bid) / 2  # Overall VWAP
-
-                  # Volume Imbalance Ratio (VIR)
-                  volume_imbalance_ratio = (total_best_bid_volume - total_best_ask_volume) / (total_best_bid_volume + total_best_ask_volume) if (total_best_bid_volume + total_best_ask_volume) != 0 else 0
-
-                  # Cumulative Delta Volume (CDV) - Running sum of (Bid Volume - Ask Volume)
-                  delta_volume = total_best_bid_volume - total_best_ask_volume
-                  cumulative_delta_volume += delta_volume
-
-                  # Liquidity Pressure Ratio (LPR)
-                  liquidity_pressure_ratio = np.log1p(total_best_bid_volume) - np.log1p(total_best_ask_volume)
-
-                  # Mean & Std of Order Sizes
-                  ask_sizes = [qty for _, qty in asks[:top_n_levels]]
-                  bid_sizes = [qty for _, qty in bids[:top_n_levels]]
-
-                  mean_ask_size = np.mean(ask_sizes) if ask_sizes else 0
-                  mean_bid_size = np.mean(bid_sizes) if bid_sizes else 0
-                  std_ask_size = np.std(ask_sizes) if ask_sizes else 0
-                  std_bid_size = np.std(bid_sizes) if bid_sizes else 0
-
-                  # Store extracted features
-                  features.append({
-                      'timestamp': ts,
-                      'mid_price': mid_price,
-                      'spread': spread,
-                      'relative_spread': relative_spread,
-                      'total_best_ask_volume': total_best_ask_volume,
-                      'total_best_bid_volume': total_best_bid_volume,
-                      'market_depth_ask': market_depth_ask,
-                      'market_depth_bid': market_depth_bid,
-                      'order_book_imbalance': order_book_imbalance,
-                      'vwap_ask': vwap_ask,
-                      'vwap_bid': vwap_bid,
-                      'vwap_total': vwap_total,
-                      'volume_imbalance_ratio': volume_imbalance_ratio,
-                      'cumulative_delta_volume': cumulative_delta_volume,
-                      'liquidity_pressure_ratio': liquidity_pressure_ratio,
-                      'mean_ask_size': mean_ask_size,
-                      'mean_bid_size': mean_bid_size,
-                      'std_ask_size': std_ask_size,
-                      'std_bid_size': std_bid_size
-                  })
-
-              except (json.JSONDecodeError, ValueError, IndexError) as e:
-                  print(f'Skipping line due to error: {e}')
-
-      # Convert to DataFrame
-      return pd.DataFrame(features)
+    return pd.DataFrame(features)
 
   print(f'Calculate order book features')
 
@@ -220,7 +203,11 @@ def calc_features_order_book(symbol):
       'mean_ask_size': ['mean', 'std'],
       'mean_bid_size': ['mean', 'std'],
       'std_ask_size': ['mean'],
-      'std_bid_size': ['mean']
+      'std_bid_size': ['mean'],
+      'order_flow_imbalance': ['mean', 'std'],
+      'depth_ratio': ['mean', 'std'],
+      'price_level_count_ask': ['mean'],
+      'price_level_count_bid': ['mean']
   }
 
   # Perform aggregation
@@ -231,6 +218,10 @@ def calc_features_order_book(symbol):
   df_features_agg.reset_index(inplace=True)
 
   # Calculate Realized Volatility (1-min window): std of returns
+  df_features_agg['log_return'] = np.log(df_features_agg['mid_price_mean'] / df_features_agg['mid_price_mean'].shift(1))
+  df_features_agg['realized_volatility'] = df_features_agg['log_return'].rolling(window=5, min_periods=1).std() * np.sqrt(60*24)  # Annualized for 1-min data
+  df_features_agg.drop(columns=['log_return'], inplace=True)  # Clean up
+
   df_features_agg['realized_volatility'] = df_features_agg['mid_price_std'] / df_features_agg['mid_price_mean']
 
   # Convert startTime to timestamp
@@ -497,7 +488,7 @@ def calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio
 
 if __name__ == '__main__':
   symbol = 'BTCUSDT'
-  interval = '1'  # Kline interval (1m, 5m, 15m, etc.)
+  interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
   intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
   period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
 

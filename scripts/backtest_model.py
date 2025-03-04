@@ -73,15 +73,6 @@ def scale_features_kline(df, scalers):
 
   return df_scaled
 
-def predict_direction(predicted_price, current_price, min_change_percent=0.06):
-  '''Определяет направление движения: 1 (рост), -1 (падение), 0 (стагнация).'''
-  price_change_percent = (predicted_price - current_price) / current_price * 100
-  if price_change_percent > min_change_percent:
-    return 1  # Long
-  elif price_change_percent < -min_change_percent:
-    return -1  # Short
-  return 0  # Hold
-
 if __name__ == '__main__':
   # Настройки бота
   total_amount = 10000  # общая сумма в USDT
@@ -90,7 +81,9 @@ if __name__ == '__main__':
   fee_close = 0.0002  # 0.02% комиссия за закрытие
   delta = 0.003  # 0.3% минимальная прибыль сверх комиссий
   loss_threshold = -0.01  # порог убытка для закрытия позиции (-1% от позиции)
-
+  rmse_threshold = 200  # Порог ожидаемого изменения цены (в USD)
+  correlator_threshold = 0.7  # Порог корреляции
+  volatility_threshold = 200  # Порог волатильности (в USD)
   window_size = 16 # размер окна для предсказания цены
 
   # Минимальное изменение цены для открытия (включая комиссии и delta)
@@ -100,7 +93,7 @@ if __name__ == '__main__':
   model, scalers = load_model_and_scalers()
 
   # Load data
-  df_data = load_data_kline(symbol='BTCUSDT', interval=5)
+  df_data = load_data_kline(symbol='BTCUSDT', interval=1)
 
   # Define feature columns
   input_columns = [
@@ -144,6 +137,10 @@ if __name__ == '__main__':
   # Drop NaN values (last row will be NaN after shifting)
   df_features_scaled.dropna(inplace=True)
   
+  # Синхронизация индексов
+  valid_indices = df_features_scaled.index  # Индексы после dropna
+  df_features = df_features.loc[valid_indices]  # Оставляем только строки, соответствующие df_features_scaled
+  
   # Предсказание
   X = df_features_scaled[input_columns].values
   X = np.array(X, dtype=np.float32).reshape(X.shape[0], 1, X.shape[1])
@@ -171,20 +168,35 @@ if __name__ == '__main__':
   short_correct = 0
 
   # Цикл для тестирования бота
-  for i in range(len(df_features_scaled) - 1):  # -1, так как используем futureClosePrice
-    predicted_close = predicted_prices[i]
+  for i in range(len(df_features_scaled) - 1):  # -1, так как используем future closePrice
     current_close = actual_prices[i]
+    predicted_close = predicted_prices[i]
     next_actual_close = actual_prices[i + 1]
     current_time = times[i]
     
     # Сохраняем предсказанную цену и следующую актуальную цену
     actual_values.append(next_actual_close)  # Сдвигаем actual_values вперёд
     predicted_values.append(predicted_close)
+    
+    # Расчёт фильтров на основе не масштабированных значений из df_features
+    expected_change = abs(predicted_close - current_close)
+    lookback = min(1000, i)
+    hist_df = df_features.iloc[max(0, i - lookback):i + 1]
+    trend_strength = np.corrcoef(hist_df['startTime'], hist_df['closePrice'])[0, 1] if len(hist_df) > 1 else 0
+    mean_correlator = abs(trend_strength)
+    vol_lookback = min(10, i)
+    recent_volatility = (df_features['highPrice'].iloc[max(0, i - vol_lookback):i + 1] - 
+               df_features['lowPrice'].iloc[max(0, i - vol_lookback):i + 1]).mean()
+
+    direction = 0
+    if expected_change > rmse_threshold and mean_correlator > correlator_threshold and recent_volatility > volatility_threshold:
+      if predicted_close > current_close:
+        direction = 1
+      elif predicted_close < current_close:
+        direction = -1
 
     # Логика бота
     if not position_open:
-      direction = predict_direction(predicted_close, current_close, min_change_percent)
-
       # Условие для открытия позиции
       if direction == 1 or direction == -1:
         position_amount = total_amount * (percent_per_trade / 100)
@@ -200,8 +212,6 @@ if __name__ == '__main__':
           short_signals += 1
         print(f'Opened {position_type} position at {entry_price:.2f} with {position_amount:.2f} USDT at time {current_time}, Unrealized PnL: {unrealized_pnl:.2f}')
     else:
-      direction = predict_direction(predicted_close, current_close, min_change_percent)
-      
       # Расчёт нереализованной прибыли с учётом текущей цены
       if position_type == 'Long':
         gross_profit = (current_close - entry_price) / entry_price * position_amount
