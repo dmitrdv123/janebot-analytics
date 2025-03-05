@@ -32,12 +32,11 @@ def calc_features_kline(symbol, interval):
   df_features['turnover'] = df_features['turnover'].astype(float)
 
   df_features = calc_features_kline_based(df_features)
-  
+
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='startTime')
 
-  # Save the features to a CSV file
-  save_features(df_features, 'features/kline', symbol, interval)
+  return df_features
 
 def calc_features_index_price_kline(symbol, interval):
   print(f'Calculate index price kline features')
@@ -72,8 +71,8 @@ def calc_features_premium_index_price_kline(symbol, interval):
   # Save the features to a CSV file
   save_features(df_features, 'features/premium_index_price_kline', symbol, interval)
 
-def calc_features_order_book(symbol):
-  def process_order_book(file_path, top_n_levels=20):
+def calc_features_order_book(symbol, interval=1):
+  def process_order_book(file_path, top_n_levels=20, cumulative_delta_volume_start=0, timestamp_start=0):
     '''
     Processes a large order book file line by line and extracts relevant features including VWAP and volume-based metrics.
 
@@ -85,13 +84,18 @@ def calc_features_order_book(symbol):
     - pd.DataFrame: DataFrame with extracted features.
     '''
     features = []
-    cumulative_delta_volume = 0  # Initialize CDV
+    cumulative_delta_volume = cumulative_delta_volume_start  # Initialize CDV
 
     with open(file_path, 'r') as file:
       for line in file:
         try:
           order_book = json.loads(line.strip())
           ts = order_book['ts']  # Timestamp
+          
+          # Check if timestamp of last records in features are the same as ts
+          if ts <= timestamp_start:
+            continue
+
           asks = [(float(price), float(qty)) for price, qty in order_book['data']['a']]
           bids = [(float(price), float(qty)) for price, qty in order_book['data']['b']]
 
@@ -161,18 +165,27 @@ def calc_features_order_book(symbol):
         except (json.JSONDecodeError, ValueError, IndexError) as e:
           print(f'Skipping line due to error: {e}')
 
-    return pd.DataFrame(features)
+    return pd.DataFrame(features), cumulative_delta_volume
 
   print(f'Calculate order book features')
 
   all_features = []
+  cumulative_delta_volume = 0
+  timestamp_last = 0
 
   # Iterate over all files in the order book directory
   order_book_dir = f'data/order_book/{symbol}'
-  for filename in os.listdir(order_book_dir):
+
+  # Filter and sort files by date
+  order_book_files = [f for f in os.listdir(order_book_dir) if f.endswith('.data')]
+  order_book_files.sort(key=lambda x: pd.to_datetime(x.split('_')[0]))
+
+  for filename in order_book_files:
       file_path = os.path.join(order_book_dir, filename)
       if os.path.isfile(file_path):
-          df_features = process_order_book(file_path)
+          # Filter records by timestamp columns to ensure they are within the date range
+          df_features, cumulative_delta_volume = process_order_book(file_path, cumulative_delta_volume_start=cumulative_delta_volume, timestamp_start=timestamp_last)
+          timestamp_last = df_features['timestamp'].iloc[-1]
           all_features.append(df_features)
 
   # Combine all features into a single DataFrame
@@ -182,11 +195,11 @@ def calc_features_order_book(symbol):
   df_features['timestamp'] = pd.to_datetime(df_features['timestamp'], unit='ms')  # Assuming milliseconds
 
   # Round timestamp to the nearest minute
-  df_features['timestamp'] = df_features['timestamp'].dt.floor('min')
+  df_features['timestamp'] = df_features['timestamp'].dt.floor(f'{interval}min')
 
   # Aggregate order book features per minute
   agg_funcs = {
-      'mid_price': ['mean', 'std', 'min', 'max', 'last'],  # Price statistics
+      'mid_price': ['mean', 'std', 'min', 'max', 'first', 'last'],  # Price statistics
       'spread': ['mean', 'std', 'max'],
       'relative_spread': ['mean', 'std'],
       'total_best_ask_volume': ['mean', 'std', 'sum', 'max'],
@@ -198,7 +211,7 @@ def calc_features_order_book(symbol):
       'vwap_bid': ['mean'],
       'vwap_total': ['mean'],
       'volume_imbalance_ratio': ['mean', 'std'],
-      'cumulative_delta_volume': ['last'],  # Running sum, take last value
+      'cumulative_delta_volume': ['first', 'last'],  # Running sum, take last value
       'liquidity_pressure_ratio': ['mean', 'std'],
       'mean_ask_size': ['mean', 'std'],
       'mean_bid_size': ['mean', 'std'],
@@ -222,16 +235,13 @@ def calc_features_order_book(symbol):
   df_features_agg['realized_volatility'] = df_features_agg['log_return'].rolling(window=5, min_periods=1).std() * np.sqrt(60*24)  # Annualized for 1-min data
   df_features_agg.drop(columns=['log_return'], inplace=True)  # Clean up
 
-  df_features_agg['realized_volatility'] = df_features_agg['mid_price_std'] / df_features_agg['mid_price_mean']
-
   # Convert startTime to timestamp
   df_features_agg['timestamp'] = df_features_agg['timestamp'].astype('int64') // 10**6
 
   # Order by timestamp ascending
   df_features_agg = df_features_agg.sort_values(by='timestamp')
 
-  # Save to CSV
-  save_features(df_features_agg, 'features/order_book', symbol)
+  return df_features_agg
 
 def calc_features_funding_rate(symbol):
   print(f'Calculate funding rate features')
@@ -269,7 +279,7 @@ def calc_features_funding_rate(symbol):
 
   # Convert startTime to timestamp
   df_features['fundingRateTimestamp'] = df_features['fundingRateTimestamp'].astype('int64') // 10**6
-  
+
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='fundingRateTimestamp')
 
@@ -378,23 +388,45 @@ def calc_features_open_interest(symbol, intervalTime):
 
   # Convert startTime to timestamp
   df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
-  
+
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='timestamp')
 
   save_features(df_features, f'features/open_interest', symbol, intervalTime)
+
+def merge_features(df_features1, df_features2, timestamp_col1, timestamp_col2, prefix1=None, prefix2=None):
+  if prefix1 != None:
+    df_features1 = df_features1.add_prefix(prefix1)
+  if prefix2 != None:
+    df_features2 = df_features2.add_prefix(prefix2)
+
+  prefixed_timestamp_col1 = timestamp_col1 if prefix1 == None else f'{prefix1}_{timestamp_col1}'
+  prefixed_timestamp_col2 = timestamp_col2 if prefix2 == None else f'{prefix2}_{timestamp_col2}'
+
+  df_merged = pd.merge_asof(
+    df_features1.sort_values(prefixed_timestamp_col1),
+    df_features2.sort_values(prefixed_timestamp_col2),
+    left_on=prefixed_timestamp_col1,
+    right_on=prefixed_timestamp_col2,
+    direction='backward'
+  )
+
+  # Order by timestamp ascending
+  df_features = df_features.sort_values(by=prefixed_timestamp_col1)
+
+  return df_merged
 
 def merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio):
   df_features_kline = pd.read_csv(f'features/kline/{symbol}/{interval}/features.csv')
   df_features_mark_price_kline = pd.read_csv(f'features/mark_price_kline/{symbol}/{interval}/features.csv')
   df_features_index_price_kline = pd.read_csv(f'features/index_price_kline/{symbol}/{interval}/features.csv')
   df_features_premium_index_price_kline = pd.read_csv(f'features/premium_index_price_kline/{symbol}/{interval}/features.csv')
-  
+
   df_features_funding_rate = pd.read_csv(f'features/funding_rate/{symbol}/features.csv')
   df_features_long_short_ratio = pd.read_csv(f'features/long_short_ratio/{symbol}/{period_long_short_ratio}/features.csv')
   df_features_open_interest = pd.read_csv(f'features/open_interest/{symbol}/{intervalTime}/features.csv')
   df_features_order_book = pd.read_csv(f'features/order_book/{symbol}/features.csv')
-  
+
   df_features_kline = df_features_kline.add_prefix('features_kline_')
   df_features_mark_price_kline = df_features_mark_price_kline.add_prefix('features_mark_price_kline_')
   df_features_index_price_kline = df_features_index_price_kline.add_prefix('features_index_price_kline_')
@@ -404,7 +436,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
   df_features_long_short_ratio = df_features_long_short_ratio.add_prefix('features_long_short_ratio_')
   df_features_open_interest = df_features_open_interest.add_prefix('features_open_interest_')
   df_features_order_book = df_features_order_book.add_prefix('features_order_book_')
-  
+
   df_merged = pd.merge_asof(
     df_features_kline.sort_values('features_kline_startTime'),
     df_features_mark_price_kline.sort_values('features_mark_price_kline_startTime'),
@@ -412,7 +444,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
     right_on='features_mark_price_kline_startTime',
     direction='backward'
   )
-  
+
   df_merged = pd.merge_asof(
     df_merged.sort_values('features_kline_startTime'),
     df_features_index_price_kline.sort_values('features_index_price_kline_startTime'),
@@ -420,7 +452,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
     right_on='features_index_price_kline_startTime',
     direction='backward'
   )
-  
+
   df_merged = pd.merge_asof(
     df_merged.sort_values('features_kline_startTime'),
     df_features_premium_index_price_kline.sort_values('features_premium_index_price_kline_startTime'),
@@ -428,7 +460,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
     right_on='features_premium_index_price_kline_startTime',
     direction='backward'
   )
-  
+
   df_merged = pd.merge_asof(
     df_merged.sort_values('features_kline_startTime'),
     df_features_funding_rate.sort_values('features_funding_rate_fundingRateTimestamp'),
@@ -436,7 +468,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
     right_on='features_funding_rate_fundingRateTimestamp',
     direction='backward'
   )
-  
+
   df_merged = pd.merge_asof(
     df_merged.sort_values('features_kline_startTime'),
     df_features_long_short_ratio.sort_values('features_long_short_ratio_timestamp'),
@@ -444,7 +476,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
     right_on='features_long_short_ratio_timestamp',
     direction='backward'
   )
-  
+
   df_merged = pd.merge_asof(
     df_merged.sort_values('features_kline_startTime'),
     df_features_open_interest.sort_values('features_open_interest_timestamp'),
@@ -452,7 +484,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
     right_on='features_open_interest_timestamp',
     direction='backward'
   )
-  
+
   df_merged = pd.merge_asof(
     df_merged.sort_values('features_kline_startTime'),
     df_features_order_book.sort_values('features_order_book_timestamp'),
@@ -460,7 +492,7 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
     right_on='features_order_book_timestamp',
     direction='backward'
   )
-  
+
   # Filter by order book interval
   min_timestamp = df_features_order_book['features_order_book_timestamp'].min()
   max_timestamp = df_features_order_book['features_order_book_timestamp'].max()
@@ -470,13 +502,13 @@ def merge_features_open_interest(symbol, interval, intervalTime, period_long_sho
 
 def calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio):
   df = merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio)
-  
+
   # Open Interest to Price ratio
   df['features_open_interest_oi_to_price_ratio'] = df['features_open_interest_openInterest'] / df['features_kline_closePrice']
-  
+
   # Price vs Open Interest Divergence
   df['features_open_interest_price_vs_oi_divergence'] = df['features_kline_closePrice'].pct_change() - df['features_open_interest_openInterest'].pct_change()
-  
+
   # Calculate correlation between buyRatio and price over 5 minutes
   df['features_long_short_ratio_corr_long_short_price_5min'] = df['features_long_short_ratio_buyRatio'].rolling(window=5).corr(df['features_kline_closePrice'])
   df['features_long_short_ratio_corr_long_short_price_10min'] = df['features_long_short_ratio_buyRatio'].rolling(window=10).corr(df['features_kline_closePrice'])
@@ -492,13 +524,20 @@ if __name__ == '__main__':
   intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
   period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
 
-  calc_features_kline(symbol, interval)
-  calc_features_index_price_kline(symbol, interval)
-  calc_features_mark_price_kline(symbol, interval)
-  calc_features_premium_index_price_kline(symbol, interval)
-  calc_features_order_book(symbol)
-  calc_features_funding_rate(symbol)
-  calc_features_long_short_ratio(symbol, period_long_short_ratio)
-  calc_features_open_interest(symbol, intervalTime)
+  df_features_kline = calc_features_kline(symbol, interval)
+  save_features(df_features_kline, 'features/kline', symbol, interval)
 
-  calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio)
+  df_features_orderbook = calc_features_order_book(symbol, interval)
+  save_features(df_features_orderbook, 'features/orderbook', symbol, interval)
+
+  df_merged = merge_features(df_features_kline, df_features_orderbook, 'startTime', 'timestamp', 'kline', 'orderbook')
+  save_features(df_features_orderbook, 'features/kline_orderbook', symbol)
+
+  # calc_features_index_price_kline(symbol, interval)
+  # calc_features_mark_price_kline(symbol, interval)
+  # calc_features_premium_index_price_kline(symbol, interval)
+  # calc_features_funding_rate(symbol)
+  # calc_features_long_short_ratio(symbol, period_long_short_ratio)
+  # calc_features_open_interest(symbol, intervalTime)
+
+  # calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio)
