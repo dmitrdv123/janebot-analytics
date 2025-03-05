@@ -283,7 +283,7 @@ def calc_features_funding_rate(symbol):
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='fundingRateTimestamp')
 
-  save_features(df_features, 'features/funding_rate', symbol)
+  return df_features
 
 def calc_features_long_short_ratio(symbol, period):
   print(f'Calculate long short ratio features')
@@ -349,7 +349,7 @@ def calc_features_long_short_ratio(symbol, period):
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='timestamp')
 
-  save_features(df_features, f'features/long_short_ratio', symbol, period)
+  return df_features
 
 def calc_features_open_interest(symbol, intervalTime):
   print(f'Calculate open interest features')
@@ -530,14 +530,18 @@ if __name__ == '__main__':
   df_features_orderbook = calc_features_order_book(symbol, interval)
   save_features(df_features_orderbook, 'features/orderbook', symbol, interval)
 
+  df_features_funding_rate = calc_features_funding_rate(symbol)
+  save_features(df_features_funding_rate, 'features/funding_rate', symbol)
+  
+  df_features_long_short_ratio = calc_features_long_short_ratio(symbol, period_long_short_ratio)
+  save_features(df_features_long_short_ratio, 'features/long_short_ratio', symbol, period_long_short_ratio)
+
   df_merged = merge_features(df_features_kline, df_features_orderbook, 'startTime', 'timestamp', 'kline', 'orderbook')
   save_features(df_features_orderbook, 'features/kline_orderbook', symbol)
 
   # calc_features_index_price_kline(symbol, interval)
   # calc_features_mark_price_kline(symbol, interval)
   # calc_features_premium_index_price_kline(symbol, interval)
-  # calc_features_funding_rate(symbol)
-  # calc_features_long_short_ratio(symbol, period_long_short_ratio)
   # calc_features_open_interest(symbol, intervalTime)
 
   # calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio)
