@@ -128,14 +128,12 @@ if __name__ == '__main__':
 
   # Define model output
   df_features_kline['futureRelativePriceChange'] = df_features_kline['relativePriceChange'].shift(-1)
-  df_features_kline['futurePriceChange'] = df_features_kline['priceChange'].shift(-1)
-  df_features_kline['futureClosePrice'] = df_features_kline['closePrice'].shift(-1)
-  
-  # Order by timestamp ascending
-  df_features_kline = df_features_kline.sort_values(by='startTime')
-  
+
   # Drop NaN values (last row will be NaN after shifting)
   df_features_kline.dropna(inplace=True)
+
+  # Order by timestamp ascending
+  df_features_kline = df_features_kline.sort_values(by='startTime')
 
   # Define signal for classification
   df_features_kline['signal'] = 0  # Hold
@@ -146,7 +144,7 @@ if __name__ == '__main__':
   df_features_kline_scaled, scalers_features_kline = prepare_features_kline(df_features_kline)
 
   # Define feature columns
-  input_columns = [
+  columns_input = [
     'openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover',
     'priceChange', 'relativePriceChange', 'logReturn', 'SMA_5', 'SMA_10',
     'EMA_5', 'EMA_10', 'hourOfDay', 'dayOfWeek', 'weekOfYear', 'monthOfYear',
@@ -156,11 +154,11 @@ if __name__ == '__main__':
   ]
 
   # Target variable
-  target_column = 'signal'
+  column_target = 'signal'
 
   # Prepare input and output data
-  X = df_features_kline_scaled[input_columns].values
-  y = df_features_kline_scaled[target_column].values  # 0, 1, 2 (Hold, Short, Long)
+  X = df_features_kline_scaled[columns_input].values
+  y = df_features_kline_scaled[column_target].values  # 0, 1, 2 (Hold, Short, Long)
 
   # Convert y to one-hot encoding
   y_onehot = tf.keras.utils.to_categorical(y, num_classes=3)
@@ -237,6 +235,17 @@ if __name__ == '__main__':
       f"Precision (Hold): {test_metrics[2]:.4f}, Precision (Short): {test_metrics[3]:.4f}, Precision (Long): {test_metrics[4]:.4f}, "
       f"Recall (Hold): {test_metrics[5]:.4f}, Recall (Short): {test_metrics[6]:.4f}, Recall (Long): {test_metrics[7]:.4f}, "
       f"F1 (weighted): {test_metrics[8]:.4f}")
+
+  # Calculate metrics on original data
+  price_changes = [abs(df_features_kline["priceChange"])]
+  avg_price_change = np.mean(price_changes)
+  print(f"Среднее абсолютное изменение цены (|closePrice[i] - closePrice[i-1]|): {avg_price_change:.2f} USD")
+
+  std_close_price = df_features_kline["closePrice"].std()
+  print(f"Стандартное отклонение closePrice: {std_close_price:.2f} USD")
+
+  avg_candle_range = (df_features_kline["highPrice"] - df_features_kline["lowPrice"]).mean()
+  print(f"Средний размах свечей (highPrice - lowPrice): {avg_candle_range:.2f} USD")
 
   # Get train and test indices to align with original DataFrame
   train_indices = df_features_kline.index[:len(y_train_onehot)]
