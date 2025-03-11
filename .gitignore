@@ -3,5 +3,6 @@ logs
 data
 models
 features
+predictions
 __pycache__
 .idea

@@ -91,7 +91,7 @@ def calc_features_order_book(symbol, interval=1):
         try:
           order_book = json.loads(line.strip())
           ts = order_book['ts']  # Timestamp
-          
+
           # Check if timestamp of last records in features are the same as ts
           if ts <= timestamp_start:
             continue
@@ -340,12 +340,12 @@ def calc_features_long_short_ratio(symbol, period):
   df_features['sellRatio_lag_1'] = df_features['sellRatio'].shift(1)
 
   # Extreme buy or sell ratio
-  df_features['extreme_buy_ratio'] = df_features['buyRatio'] > 0.9  # Threshold for extreme sentiment
-  df_features['extreme_sell_ratio'] = df_features['sellRatio'] > 0.9
+  df_features['extreme_buy_ratio'] = (df_features['buyRatio'] > 0.57).astype(int)  # Threshold for extreme sentiment
+  df_features['extreme_sell_ratio'] = (df_features['sellRatio'] > 0.45).astype(int)
 
   # Convert startTime to timestamp
   df_features['timestamp'] = df_features['timestamp'].astype('int64') // 10**6
-  
+
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='timestamp')
 
@@ -392,29 +392,7 @@ def calc_features_open_interest(symbol, intervalTime):
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='timestamp')
 
-  save_features(df_features, f'features/open_interest', symbol, intervalTime)
-
-def merge_features(df_features1, df_features2, timestamp_col1, timestamp_col2, prefix1=None, prefix2=None):
-  if prefix1 != None:
-    df_features1 = df_features1.add_prefix(prefix1)
-  if prefix2 != None:
-    df_features2 = df_features2.add_prefix(prefix2)
-
-  prefixed_timestamp_col1 = timestamp_col1 if prefix1 == None else f'{prefix1}_{timestamp_col1}'
-  prefixed_timestamp_col2 = timestamp_col2 if prefix2 == None else f'{prefix2}_{timestamp_col2}'
-
-  df_merged = pd.merge_asof(
-    df_features1.sort_values(prefixed_timestamp_col1),
-    df_features2.sort_values(prefixed_timestamp_col2),
-    left_on=prefixed_timestamp_col1,
-    right_on=prefixed_timestamp_col2,
-    direction='backward'
-  )
-
-  # Order by timestamp ascending
-  df_features = df_features.sort_values(by=prefixed_timestamp_col1)
-
-  return df_merged
+  return df_features
 
 def merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio):
   df_features_kline = pd.read_csv(f'features/kline/{symbol}/{interval}/features.csv')
@@ -532,16 +510,15 @@ if __name__ == '__main__':
 
   df_features_funding_rate = calc_features_funding_rate(symbol)
   save_features(df_features_funding_rate, 'features/funding_rate', symbol)
-  
-  df_features_long_short_ratio = calc_features_long_short_ratio(symbol, period_long_short_ratio)
-  save_features(df_features_long_short_ratio, 'features/long_short_ratio', symbol, period_long_short_ratio)
 
-  df_merged = merge_features(df_features_kline, df_features_orderbook, 'startTime', 'timestamp', 'kline', 'orderbook')
-  save_features(df_features_orderbook, 'features/kline_orderbook', symbol)
+  df_features_long_short_ratio = calc_features_long_short_ratio(symbol, intervalTime)
+  save_features(df_features_long_short_ratio, 'features/long_short_ratio', symbol, intervalTime)
+
+  df_features_open_interest = calc_features_open_interest(symbol, intervalTime)
+  save_features(df_features_open_interest, 'features/open_interest', symbol, intervalTime)
 
   # calc_features_index_price_kline(symbol, interval)
   # calc_features_mark_price_kline(symbol, interval)
   # calc_features_premium_index_price_kline(symbol, interval)
-  # calc_features_open_interest(symbol, intervalTime)
 
   # calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio)
