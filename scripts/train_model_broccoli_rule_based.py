@@ -267,9 +267,6 @@ if __name__ == '__main__':
   df_data_kline = load_data(f'data/kline/{symbol}/{interval}')
   df_data_funding_rate = load_data(f'data/funding_rate/{symbol}')
 
-  # Take the last 20% of df_features_kline
-  df_data_kline = df_data_kline.tail(int(len(df_data_kline) * 0.2))
-
   df_data_kline['startTime'] = pd.to_datetime(df_data_kline['startTime'], unit='ms')
   df_data_funding_rate['fundingRateTimestamp'] = pd.to_datetime(df_data_funding_rate['fundingRateTimestamp'], unit='ms')
 
@@ -283,7 +280,7 @@ if __name__ == '__main__':
 
   # Drop records without features
   df_data = df_data.iloc[12:].reset_index(drop=True)
-  
+
   # Find optimal params
   best_reward, best_params = find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges)
   print(f'Best rewards: {best_reward:.4f}')
