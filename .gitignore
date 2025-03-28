@@ -6,3 +6,4 @@ features
 predictions
 __pycache__
 .idea
+.env
