@@ -1,7 +1,10 @@
 import json
 import os
+import gzip
 import numpy as np
 import pandas as pd
+
+from scipy.stats import zscore
 
 from utils import ensure_directory, load_data
 from utils_features import calc_features_kline_based
@@ -16,7 +19,7 @@ def save_features(df, base_folder, symbol, interval=None):
   df.to_csv(filename, index=False)
   print(f'Feature saved to {filename}')
 
-def calc_features_kline(symbol, interval):
+def calc_features_kline(symbol, interval, window_short=12, window_long=24):
   print(f'Calculate kline features')
 
   # Load the Kline Data
@@ -31,7 +34,7 @@ def calc_features_kline(symbol, interval):
   df_features['volume'] = df_features['volume'].astype(float)
   df_features['turnover'] = df_features['turnover'].astype(float)
 
-  df_features = calc_features_kline_based(df_features)
+  df_features = calc_features_kline_based(df_features, window_short=window_short, window_long=window_long)
 
   # Order by timestamp ascending
   df_features = df_features.sort_values(by='startTime')
@@ -394,6 +397,190 @@ def calc_features_open_interest(symbol, intervalTime):
 
   return df_features
 
+def calc_data_trades_parse_line(line):
+  """Parse a single trade line from CSV"""
+  parts = line.strip().split(',')
+  if len(parts) != 10:
+    raise ValueError(f"Invalid line format: {line}")
+
+  timestamp_str,symbol,side,size,price,tickDirection,trdMatchID,grossValue,homeNotional,foreignNotional = parts
+
+  # Parse timestamp (e.g., "1739491200.5817")
+  timestamp_parts = timestamp_str.split('.')
+  
+  seconds = timestamp_parts[0]
+  
+  # Convert seconds to microseconds first (multiply by 1,000,000)
+  timestamp_us = int(seconds) * 1_000_000
+  
+  if len(timestamp_parts) == 2:
+    decimal = timestamp_parts[1]
+    # Pad decimal to 6 digits with zeros on the right
+    decimal_padded = decimal.ljust(6, '0')
+    # Add the padded decimal as an integer
+    timestamp_us += int(decimal_padded)
+
+  return {
+    'exchange': 'bybit',
+    'symbol': symbol.upper(),  # Ensure uppercase as per Tardis spec
+    'timestamp': timestamp_us,
+    'local_timestamp': timestamp_us,  # Same as timestamp per requirement
+    'id': trdMatchID,
+    'side': side.lower(),  # Ensure lowercase "buy" or "sell" as Tardis expects
+    'price': float(price),
+    'amount': float(size)
+  }
+
+def calc_data_trades_load_file(file):
+  """Convert Bybit trades zip archive to Tardis trades CSV"""
+  # Define Tardis trades column names
+  columns = [
+    'exchange', 'symbol', 'timestamp', 'local_timestamp',
+    'id', 'side', 'price', 'amount'
+  ]
+
+  # Process zip archive
+  results = []
+  with gzip.open(file, 'rt') as gz_file:  # 'rt' for text mode
+    # Skip header if present (uncomment and adjust if your CSV has a header)
+    next(gz_file)  # Skip first line if it's a header
+    for line in gz_file:
+      processed = calc_data_trades_parse_line(line)
+      if processed:
+        results.append(processed)
+
+  # Create DataFrame and save to CSV
+  df = pd.DataFrame(results, columns=columns)
+  return df
+
+def calc_data_trades(symbol):
+  dir = f'data/trades/{symbol}'
+  order_book_files = [f for f in os.listdir(dir) if f.endswith('.gz')]
+
+  for filename in order_book_files:
+    file_path = os.path.join(dir, filename)
+    print(f'Calc data trades: {filename}')
+    if os.path.isfile(file_path):
+      df = calc_data_trades_load_file(file_path)
+      df.to_csv(file_path.replace('.gz', ''), index=False)
+
+def calc_features_trades_aggregate_to_seconds(symbol):
+  print(f'Calculate aggregate to seconds trades features for {symbol}')
+
+  folder = f'data/trades/{symbol}'
+
+  # Load Data
+  df_trades = load_data(folder, file_extension='.csv')
+
+  # Convert timestamp from microseconds to seconds (rounding down)
+  df_trades['timestamp'] = df_trades['timestamp'] // 1_000_000
+
+  # Pivot to split buy and sell
+  df_pivot = df_trades.pivot_table(
+    index='timestamp',
+    columns='side',
+    values=['price', 'amount'],
+    aggfunc={'price': 'mean', 'amount': 'sum'}
+  )
+
+  # Flatten the MultiIndex columns
+  df_pivot.columns = [
+    f"{col[0]}_{col[1]}" if col[1] else col[0] 
+    for col in df_pivot.columns
+  ]
+
+  df_pivot = df_pivot.reset_index()
+
+  return df_pivot
+
+def calc_features_trades_calculate_rsi(df, window_sec):
+  '''
+  Calculate the Relative Strength Index (RSI) over a time-based window in seconds.
+  '''
+
+  # Ensure DataFrame has a datetime index
+  if not isinstance(df.index, pd.DatetimeIndex):
+    raise ValueError('DataFrame must have a DatetimeIndex for time-based RSI')
+
+  # Calculate price changes (delta) per trade
+  delta = df['price'].diff()
+
+  # Resample to a regular time grid (e.g., 1s) and compute gains/losses over window_sec
+  gain = delta.where(delta > 0, 0).rolling(f'{window_sec}s').mean()
+  loss = (-delta.where(delta < 0, 0)).rolling(f'{window_sec}s').mean()
+
+  # Compute RS and RSI
+  rs = gain / (loss + 1e-6)
+  rsi = 100 - (100 / (1 + rs))
+  return rsi
+
+def calc_features_trades_on_trades_aggregate_seconds(symbol, window_short_sec=20, window_long_sec=60, rsi_window_sec=20):
+  print(f'Calculate trades features for {symbol}')
+
+  # Load Data
+  df_features = load_data(f'features/trades_seconds/{symbol}', file_extension='.csv')
+
+  # Ensure timestamp is datetime (seconds) and set index
+  df_features['dt'] = pd.to_datetime(df_features['timestamp'])
+  df_features.set_index('dt', inplace=True)
+  df_features = df_features[~df_features.index.duplicated(keep='first')].sort_index()
+
+  # Fill missing values with 0 for amounts and NaN for prices (to avoid incorrect calculations)
+  df_features[['amount_buy', 'amount_sell']] = df_features[['amount_buy', 'amount_sell']].fillna(0)
+  df_features[['price_buy', 'price_sell']] = df_features[['price_buy', 'price_sell']].ffill()
+
+  # Define a representative price (e.g., midpoint or volume-weighted)
+  df_features['price'] = (
+    (df_features['price_buy'] * df_features['amount_buy'] + 
+     df_features['price_sell'] * df_features['amount_sell']) / 
+    (df_features['amount_buy'] + df_features['amount_sell'] + 1e-10)
+  )  # Volume-weighted average price
+  df_features['amount'] = df_features['amount_buy'] + df_features['amount_sell']
+
+  # --- Price-Based Features ---
+  df_features['returns'] = df_features['price'].pct_change()
+
+  # Time-based rolling windows (seconds to trades conversion)
+  df_features['short_ma'] = df_features['price'].ewm(span=window_short_sec, adjust=False).mean()
+  df_features['long_ma'] = df_features['price'].ewm(span=window_long_sec, adjust=False).mean()
+  df_features['volatility'] = df_features['returns'].rolling(f'{window_long_sec}s').std()
+
+  # --- Technical Indicators ---
+  df_features['macd'] = df_features['short_ma'] - df_features['long_ma']
+  df_features['macd_signal'] = df_features['macd'].ewm(span=window_short_sec, adjust=False).mean()
+  df_features['macd_hist'] = df_features['macd'] - df_features['macd_signal']
+  df_features['rsi'] = calc_features_trades_calculate_rsi(df_features, rsi_window_sec)
+
+  # --- Order Flow and Microstructure ---
+  df_features['imbalance'] = (df_features['amount_buy'] - df_features['amount_sell']) / (df_features['amount_buy'] + df_features['amount_sell'] + 1e-10)
+  df_features['velocity'] = df_features['price'].diff()
+  df_features['spread_proxy'] = np.abs(df_features['price_buy'] - df_features['price_sell'])
+  df_features['volatility_level'] = pd.qcut(df_features['volatility'].dropna(), q=3, labels=[0, 1, 2])
+
+  df_features['vwap'] = (
+    (df_features['price_buy'] * df_features['amount_buy'] + 
+     df_features['price_sell'] * df_features['amount_sell']).rolling(f'{window_long_sec}s').sum()
+  ) / df_features['amount'].rolling(f'{window_long_sec}s').sum()
+  df_features['vwap_momentum'] = df_features['vwap'].diff()
+
+  # --- Smoothed Noisy Features ---
+  df_features['price_smoothed'] = df_features['price'].ewm(span=5, adjust=False).mean()
+  df_features['price_impact'] = df_features['price_smoothed'].diff() / (df_features['amount'] + 1e-10)
+  df_features['price_accel'] = df_features['velocity'].ewm(span=5, adjust=False).mean().diff()
+
+  # --- Trend and State ---
+  df_features['trend_direction'] = (df_features['short_ma'] > df_features['long_ma']).astype(int)
+  df_features['trend_strength'] = df_features['trend_direction'] * df_features['imbalance']
+  df_features['state'] = (df_features['volatility_level'].astype('Int64') * 2 + df_features['trend_direction']).where(df_features['volatility_level'].notna())
+
+  # --- Normalized Features ---
+  df_features['amount_z'] = (df_features['amount'] - df_features['amount'].rolling(f'{window_long_sec}s').mean()) / df_features['amount'].rolling(f'{window_long_sec}s').std()
+
+  df_features.reset_index(inplace=True)
+  df_features.drop(columns=['dt'], inplace=True)
+
+  return df_features
+
 def merge_features_open_interest(symbol, interval, intervalTime, period_long_short_ratio):
   df_features_kline = pd.read_csv(f'features/kline/{symbol}/{interval}/features.csv')
   df_features_mark_price_kline = pd.read_csv(f'features/mark_price_kline/{symbol}/{interval}/features.csv')
@@ -497,25 +684,33 @@ def calc_features_merged(symbol, interval, intervalTime, period_long_short_ratio
   save_features(df, f'features/merged', symbol)
 
 if __name__ == '__main__':
-  symbol = 'BTCUSDT'
+  symbol = 'BROCCOLIUSDT'
   interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
   intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
   period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
 
+  # calc_data_trades(symbol)
+
+  # df_feature_trades_aggregate = calc_features_trades_aggregate_to_seconds(symbol)
+  # save_features(df_feature_trades_aggregate, 'features/trades_seconds', symbol)
+
+  # df_features_trades = calc_features_trades_on_trades_aggregate_seconds(symbol)
+  # save_features(df_features_trades, 'features/trades', symbol)
+
   df_features_kline = calc_features_kline(symbol, interval)
   save_features(df_features_kline, 'features/kline', symbol, interval)
 
-  df_features_orderbook = calc_features_order_book(symbol, interval)
-  save_features(df_features_orderbook, 'features/orderbook', symbol, interval)
+  # df_features_orderbook = calc_features_order_book(symbol, interval)
+  # save_features(df_features_orderbook, 'features/orderbook', symbol, interval)
 
-  df_features_funding_rate = calc_features_funding_rate(symbol)
-  save_features(df_features_funding_rate, 'features/funding_rate', symbol)
+  # df_features_funding_rate = calc_features_funding_rate(symbol)
+  # save_features(df_features_funding_rate, 'features/funding_rate', symbol)
 
-  df_features_long_short_ratio = calc_features_long_short_ratio(symbol, intervalTime)
-  save_features(df_features_long_short_ratio, 'features/long_short_ratio', symbol, intervalTime)
+  # df_features_long_short_ratio = calc_features_long_short_ratio(symbol, intervalTime)
+  # save_features(df_features_long_short_ratio, 'features/long_short_ratio', symbol, intervalTime)
 
-  df_features_open_interest = calc_features_open_interest(symbol, intervalTime)
-  save_features(df_features_open_interest, 'features/open_interest', symbol, intervalTime)
+  # df_features_open_interest = calc_features_open_interest(symbol, intervalTime)
+  # save_features(df_features_open_interest, 'features/open_interest', symbol, intervalTime)
 
   # calc_features_index_price_kline(symbol, interval)
   # calc_features_mark_price_kline(symbol, interval)

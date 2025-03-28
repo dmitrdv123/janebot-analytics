@@ -30,7 +30,7 @@ def calculate_roc(df, period=14):
   roc = ((df['closePrice'] - df['closePrice'].shift(period)) / df['closePrice'].shift(period)) * 100
   return roc
 
-def calc_features_kline_based(df_features):
+def calc_features_kline_based(df_features, window_short=12, window_long=24):
   # Convert startTime to datetime format (assuming startTime column exists)
   df_features['startTime'] = pd.to_datetime(df_features['startTime'], unit='ms')
 
@@ -39,6 +39,8 @@ def calc_features_kline_based(df_features):
   df_features['highPrice'] = df_features['highPrice'].astype(float)
   df_features['lowPrice'] = df_features['lowPrice'].astype(float)
   df_features['closePrice'] = df_features['closePrice'].astype(float)
+  df_features['volume'] = df_features['volume'].astype(float)
+  df_features['turnover'] = df_features['turnover'].astype(float)
 
   # Features
 
@@ -46,20 +48,24 @@ def calc_features_kline_based(df_features):
 
   # 1.1. Price Change (Difference between last close and previous close)
   df_features['priceChange'] = df_features['closePrice'].diff()
+  df_features['priceChange_window_short'] = df_features['closePrice'] - df_features['closePrice'].shift(window_short)
+  df_features['priceChange_window_long'] = df_features['closePrice'] - df_features['closePrice'].shift(window_long)
 
   # 1.1.1 Relative price change (percentage change)
-  df_features["relativePriceChange"] = df_features["closePrice"].pct_change()
+  df_features['relativePriceChange'] = df_features["closePrice"].pct_change()
+  df_features['relativePriceChange_window_short'] = (df_features['closePrice'] - df_features['closePrice'].shift(window_short)) / df_features['closePrice'].shift(window_short)
+  df_features['relativePriceChange_window_long'] = (df_features['closePrice'] - df_features['closePrice'].shift(window_long)) / df_features['closePrice'].shift(window_long)
 
   # 1.2. Log Return
   df_features['logReturn'] = np.log(df_features['closePrice'] / df_features['closePrice'].shift(1))
 
-  # 1.3. Short-Term Moving Averages (5 and 10-period)
-  df_features['SMA_5'] = df_features['closePrice'].rolling(window=5).mean()
-  df_features['SMA_10'] = df_features['closePrice'].rolling(window=10).mean()
+  # 1.3. Short-Term Moving Averages
+  df_features['SMA_short'] = df_features['closePrice'].rolling(window=window_short).mean()
+  df_features['SMA_long'] = df_features['closePrice'].rolling(window=window_long).mean()
 
-  # 1.4. Short-Term Exponential Moving Averages (5 and 10-period)
-  df_features['EMA_5'] = df_features['closePrice'].ewm(span=5, adjust=False).mean()
-  df_features['EMA_10'] = df_features['closePrice'].ewm(span=10, adjust=False).mean()
+  # 1.4. Short-Term Exponential Moving Averages
+  df_features['EMA_short'] = df_features['closePrice'].ewm(span=window_short, adjust=False).mean()
+  df_features['EMA_long'] = df_features['closePrice'].ewm(span=window_long, adjust=False).mean()
 
   # 2. Time-Based Features
 
@@ -86,23 +92,27 @@ def calc_features_kline_based(df_features):
   # 3.1. High-Low Range (Price Volatility in a Minute)
   df_features['highLowRange'] = df_features['highPrice'] - df_features['lowPrice']
 
-  # 3.2. Standard Deviation of Returns (Rolling window of 5,10 minutes)
-  df_features['stdReturn_5m'] = df_features['logReturn'].rolling(window=5).std()
-  df_features['stdReturn_10m'] = df_features['logReturn'].rolling(window=10).std()
+  # 3.2. Standard Deviation of Returns
+  df_features['stdReturn_short'] = df_features['logReturn'].rolling(window=window_short).std()
+  df_features['stdReturn_long'] = df_features['logReturn'].rolling(window=window_long).std()
 
   # 4. Momentum Indicators
 
-  # **RSI** (14-period as a common choice)
-  df_features['RSI_14'] = calculate_rsi(df_features, period=14)
+  # **RSI**
+  df_features['RSI_short'] = calculate_rsi(df_features, period=window_short)
+  df_features['RSI_long'] = calculate_rsi(df_features, period=window_long)
 
-  # **MACD** (12-period and 26-period EMAs, and 9-period Signal line)
-  df_features['MACD_line'], df_features['MACD_signal'], df_features['MACD_histogram'] = calculate_macd(df_features)
+  # **MACD**
+  signal_period = max(round(window_long / 3), 3)
+  df_features['MACD_line'], df_features['MACD_signal'], df_features['MACD_histogram'] = calculate_macd(df_features, fast_period=window_short, slow_period=window_long, signal_period=signal_period)
 
-  # **Stochastic Oscillator** (14-period %K and %D)
-  df_features['Stochastic_K'], df_features['Stochastic_D'] = calculate_stochastic(df_features)
+  # **Stochastic Oscillator** (%K and %D)
+  df_features['Stochastic_K_short'], df_features['Stochastic_D_short'] = calculate_stochastic(df_features, period=window_short)
+  df_features['Stochastic_K_long'], df_features['Stochastic_D_long'] = calculate_stochastic(df_features, period=window_long)
 
-  # Calculate ROC with 14-period window
-  df_features['ROC_14'] = calculate_roc(df_features, period=14)
+  # Calculate ROC
+  df_features['ROC_short'] = calculate_roc(df_features, period=window_short)
+  df_features['ROC_long'] = calculate_roc(df_features, period=window_long)
 
   # Convert startTime to timestamp
   df_features['startTime'] = df_features['startTime'].astype('int64') // 10**6

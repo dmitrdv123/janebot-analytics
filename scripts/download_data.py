@@ -55,7 +55,7 @@ def download_kline(symbol, interval, start_time, end_time):
 def download_funding_rate(symbol, start_time, end_time):
   base_folder = 'data/funding_rate'
 
-  time_chunks = split_time_range(start_time, end_time)
+  time_chunks = split_time_range(start_time, end_time, hours=24)
   for start, end in time_chunks:
     response = session.get_funding_rate_history(
       category='linear',
@@ -200,17 +200,17 @@ def download_premium_index_price_kline(symbol, interval, start_time, end_time):
 
 # Example usage
 if __name__ == '__main__':
-  symbol = 'BTCUSDT'
+  symbol = 'BROCCOLIUSDT'
   interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
   period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
   intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
-  start_time = datetime(2025, 1, 1)
-  end_time = datetime(2025, 3, 5)
+  start_time = datetime(2025, 3, 23)
+  end_time = datetime(2025, 3, 28)
 
   download_kline(symbol, interval, start_time, end_time)
   download_funding_rate(symbol, start_time, end_time)
-  download_long_short_ratio(symbol, period_long_short_ratio, start_time, end_time)
-  download_open_interest(symbol, intervalTime, start_time, end_time)
-  download_index_price_kline(symbol, interval, start_time, end_time)
-  download_mark_price_kline(symbol, interval, start_time, end_time)
-  download_premium_index_price_kline(symbol, interval, start_time, end_time)
+  # download_long_short_ratio(symbol, period_long_short_ratio, start_time, end_time)
+  # download_open_interest(symbol, intervalTime, start_time, end_time)
+  # download_index_price_kline(symbol, interval, start_time, end_time)
+  # download_mark_price_kline(symbol, interval, start_time, end_time)
+  # download_premium_index_price_kline(symbol, interval, start_time, end_time)

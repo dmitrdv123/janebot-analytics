@@ -1,4 +1,5 @@
 import numpy as np
+import optuna
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
@@ -371,3 +372,31 @@ def run_bot(df, y_pred, dataset_name, col_close_price='closePrice', signal_prob_
   print(f"Reward-to-Risk Ratio (RRR): {reward_to_risk_ratio:.4f}")
 
   return total_profit, accuracy
+
+def find_broccoli_optimal_params(df, amount, fee_open, fee_close):
+  def objective(trial):
+    params = {
+      'position_amount_open': trial.suggest_float('position_amount_open', 0.1, 0.1),
+      'position_amount_increase': trial.suggest_float('position_amount_increase', 0.05, 0.05),
+      'profit_min': trial.suggest_float('profit_min', 0.01, 0.5),
+      'price_diff_threshold_open': trial.suggest_float('price_diff_threshold_open', 0.01, 0.5),
+      'price_diff_threshold_increase': trial.suggest_float('price_diff_threshold_increase', 0.005, 0.5),
+      'rsi_threshold_open': trial.suggest_int('rsi_threshold_open', 70, 90),
+      'rsi_threshold_increase': trial.suggest_int('rsi_threshold_increase', 70, 90),
+      'rsi_threshold_close': trial.suggest_int('rsi_threshold_close', 10, 30),
+      'max_duration_hours': trial.suggest_int('max_duration_hours', 12, 24 * 7)
+    }
+
+    # Run the bot and get the profits
+    _, profits, _, _, _ = run_bot(df, amount, fee_open, fee_close, params)
+
+    # Calculate total profit (sum of profits)
+    total_profit = sum(profits) if profits else 0.0
+
+    # Return negative total profit for minimization
+    return -total_profit
+
+  study = optuna.create_study()
+  study.optimize(objective, n_trials=100)
+
+  return study.best_params

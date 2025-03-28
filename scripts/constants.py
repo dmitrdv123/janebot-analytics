@@ -1,11 +1,12 @@
 # Define feature columns
 columns_input_kline = [
   'openPrice', 'highPrice', 'lowPrice', 'closePrice', 'volume', 'turnover',
-  'priceChange', 'relativePriceChange', 'logReturn', 'SMA_5', 'SMA_10',
-  'EMA_5', 'EMA_10', 'hourOfDay', 'dayOfWeek', 'weekOfYear', 'monthOfYear',
-  'minuteOfHour', 'isWeekend', 'highLowRange', 'stdReturn_5m', 'stdReturn_10m',
-  'RSI_14', 'MACD_line', 'MACD_signal', 'MACD_histogram', 'Stochastic_K',
-  'Stochastic_D', 'ROC_14'
+  'priceChange', 'priceChange_window_short', 'priceChange_window_long', 
+  'relativePriceChange', 'relativePriceChange_window_short', 'relativePriceChange_window_long',
+  'logReturn', 'SMA_short', 'SMA_long', 'EMA_short', 'EMA_long', 'hourOfDay', 'dayOfWeek', 'weekOfYear', 'monthOfYear',
+  'minuteOfHour', 'isWeekend', 'highLowRange', 'stdReturn_short', 'stdReturn_long',
+  'RSI_short', 'RSI_long', 'MACD_line', 'MACD_signal', 'MACD_histogram', 'Stochastic_K_short',
+  'Stochastic_D_short', 'Stochastic_K_long', 'Stochastic_D_long', 'ROC_short', 'ROC_long'
 ]
 
 columns_input_orderbook = [

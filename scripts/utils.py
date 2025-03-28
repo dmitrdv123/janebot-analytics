@@ -25,18 +25,22 @@ def load_data(base_folder_path: str, file_extension: str = '.csv'):
 
   # Iterate over the subfolders (which represent dates)
   for subfolder_name in os.listdir(base_folder_path):
-    subfolder_path = os.path.join(base_folder_path, subfolder_name)
+    subfolder_item = os.path.join(base_folder_path, subfolder_name)
 
     # Check if the subfolder is indeed a directory (i.e., not a file)
-    if os.path.isdir(subfolder_path):
+    if os.path.isdir(subfolder_item):
       # Iterate over the files in the subfolder
-      for filename in os.listdir(subfolder_path):
+      for filename in os.listdir(subfolder_item):
         # Filter based on file extension (e.g., CSV)
         if filename.endswith(file_extension):
-          file_path = os.path.join(subfolder_path, filename)
+          file_path = os.path.join(subfolder_item, filename)
           # Read file (assuming CSV for simplicity)
           df = pd.read_csv(file_path)
           all_files.append(df)
+    elif os.path.isfile(subfolder_item):
+      if subfolder_item.endswith(file_extension):
+        df = pd.read_csv(subfolder_item)
+        all_files.append(df)
 
   # Combine all files into a single DataFrame
   if all_files:
