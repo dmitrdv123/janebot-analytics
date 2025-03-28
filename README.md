@@ -1,50 +1,59 @@
 # Данные
 
 Данные берутся с биржи Bybit в разделе market, например:
+
 https://bybit-exchange.github.io/docs/v5/market/kline
 
+Графики для визуального анализа использовались также с Bybit из раздела trade -> futures, например:
+
+https://www.bybit.com/trade/usdt/BROCCOLIUSDT
+
 Исследованные криптовалютные пары:
-BTCUSDT
+- BTCUSDT
+- BROCCOLIUSDT
+- MELANIAUSDT
+- TRUMPUSDT
+- FARTCOINUSDT
 
-А также мемтокены
-BROCCOLIUSDT
-MELANIAUSDT
-TRUMPUSDT
-FARTCOINUSDT
-
-Основа - это KLine, сгруппированные по временым меткам (1 мин, 5 мин и тд) данные формата:
+Основа - это данные о KLine, сгруппированные по временым меткам (1 мин, 5 мин и тд) данные формата:
+```
 startTime,openPrice,highPrice,lowPrice,closePrice,volume,turnover
+```
 
-Также используются funding rate при работе бота:
+Также используются данные о funding rate при работе бота:
+```
 symbol,fundingRate,fundingRateTimestamp
+```
 
 При открытии и закрытии короткой (short, зарабатывает при падении) и длинной позиции (long, зарабатывает при росте) берутся комиссии:
-1) комиссия при открытии позиции
-2) комиссия при закрытии позиции
-3) каждые N часов если позиция открыта, то начисляется плавающая комиссия из funding rate. Если позиция закрыта раньше времени начисления, то она не применяется. Причем если ставка funding rate > 0, позиция короткая, то тебе платят. Если отрицательная, то ты платишь. И все наоборот, если позиция длинная
+- комиссия при открытии позиции
+- комиссия при закрытии позиции
+- каждые N часов, если позиция открыта, начисляется плавающая комиссия funding rate. Если позиция закрыта раньше времени начисления, то она не применяется. Причем если ставка funding rate > 0 и позиция короткая, то платят тебе. Если отрицательная, то платишь ты. И  наоборот, если позиция длинная.
 
-На основе funding rate можно вычислять также фичи, так как скажем большая положительная funding rate, говорит о том, что открыто много длинных позиций. Из полезных данных для обучения также можно выделить:
-order book - книга заявок (все заявки на открытие и закрытие позиций в данный момент времени, их цена и объемы)
-long short ratio 
-и тд. Их все можно просмотреть по ссылке выше
+На основе funding rate также можно вычислять фичи, так как скажем большая положительная funding rate, говорит о том, что открыто много длинных позиций. Из полезных данных для обучения также можно выделить:
+- order book - книга заявок (все заявки на открытие и закрытие позиций в данный момент времени, их цена и объемы)
+- long short ratio 
+- и тд. Их все можно просмотреть по ссылке выше
 
 # Подготовка
-
+```
 python -m venv .venv
 source .venv/Scripts/activate
 pip install -r requirements.txt
-
+```
 # Скачивание данных
 
 Скрипт для скачивания данных - [download_data.py](scripts/download_data.py)
 
 Укажите пару, интервал и период:
+```
 symbol = 'BROCCOLIUSDT'
 interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
 period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
 intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
 start_time = datetime(2025, 3, 23)
 end_time = datetime(2025, 3, 28)
+```
 
 Раскомментарьте строки, которые будут скачивать необходимые вам данные, например:
 ```
@@ -59,10 +68,12 @@ end_time = datetime(2025, 3, 28)
 Скрипт для расчета фич - [calc_features.py](scripts/calc_features.py)
 
 Укажите пару, интервал и период:
+```
 symbol = 'BROCCOLIUSDT'
 interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
 intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
 period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
+```
 
 Раскомментарьте строки, которые будут рассчитывать фичи, например:
 ```
@@ -185,9 +196,6 @@ period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30mi
   }
 
 ## Модель на машинного обучения
-
-Реализована в скриптах:
-- [train_model_broccoli_price_prediction_run.py](scripts/train_model_broccoli_price_prediction_run.py) - использование предсказаний модели для открытия и закрытия позиций
 
 Идея в том, чтобы заменить простые правила из предыдущей модели, такие как изменение цены и RSI, на то, что предсказывала бы мат модель, использующая множество параметров.
 
