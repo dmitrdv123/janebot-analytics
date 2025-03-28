@@ -191,7 +191,7 @@ def train_model(df_features):
   y_test = y_test.astype(np.float32)
 
   # Create the model
-  model = build_attention_model(timesteps, X_train.shape[2])
+  model = build_model(timesteps, X_train.shape[2])
 
   # Train model
   early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=50, restore_best_weights=True, verbose=1)

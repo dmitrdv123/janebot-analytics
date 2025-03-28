@@ -284,16 +284,13 @@ if __name__ == '__main__':
   # Drop records without features
   df_data = df_data.iloc[12:].reset_index(drop=True)
   
-  # Take the last 20% of df_features_kline
-  # df_data = df_data.tail(int(len(df_data) * 0.2))
-
-  # # Find optimal params
-  # best_reward, best_params = find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges)
-  # print(f'Best rewards: {best_reward:.4f}')
-  # print(f'Best params: {best_params}')
+  # Find optimal params
+  best_reward, best_params = find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges)
+  print(f'Best rewards: {best_reward:.4f}')
+  print(f'Best params: {best_params}')
 
   # Final run with optimal params
-  # params = best_params
+  params = best_params
   profit_baseline = run_baseline(df_data, fee_open, fee_close, params)
   total_amount, profits, positions, position_open_timestamps, position_close_timestamps = run_bot(df_data, amount, fee_open, fee_close, params)
 
