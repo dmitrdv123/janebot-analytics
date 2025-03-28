@@ -173,6 +173,12 @@ def evaluate(individual, df, amount, fee_open, fee_close):
 
   return (reward,)  # Возвращаем кортеж для deap
 
+def mutate_with_bounds(individual, mu, sigma, indpb, low, up):
+  tools.mutGaussian(individual, mu=mu, sigma=sigma, indpb=indpb)
+  for i in range(len(individual)):
+    individual[i] = min(max(individual[i], low[i]), up[i])
+  return individual,
+
 def find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges):
   # Очистка предыдущих определений creator, если они есть
   if "FitnessMax" in creator.__dict__:
@@ -193,7 +199,7 @@ def find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges):
   toolbox.register("population", tools.initRepeat, list, toolbox.individual)
   toolbox.register("evaluate", evaluate, df=df_data, amount=amount, fee_open=fee_open, fee_close=fee_close)
   toolbox.register("mate", tools.cxBlend, alpha=0.5)
-  toolbox.register("mutate", tools.mutPolynomialBounded, eta=20.0, low=[r[0] for r in param_ranges], up=[r[1] for r in param_ranges], indpb=0.2)
+  toolbox.register("mutate", mutate_with_bounds, mu=0, sigma=0.1, indpb=0.2, low=[r[0] for r in param_ranges], up=[r[1] for r in param_ranges])
   toolbox.register("select", tools.selTournament, tournsize=3)
 
   # Запускаем алгоритм
@@ -309,6 +315,7 @@ if __name__ == '__main__':
 
   expected_value = 0.0
   profit_factor = 0.0
+  reward_to_risk_ratio = 0.0
   if profits:
     total_gains = sum(p for p in profits if p > 0)
     total_losses = abs(sum(p for p in profits if p < 0))
