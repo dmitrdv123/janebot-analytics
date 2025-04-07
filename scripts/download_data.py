@@ -200,12 +200,12 @@ def download_premium_index_price_kline(symbol, interval, start_time, end_time):
 
 # Example usage
 if __name__ == '__main__':
-  symbol = 'BROCCOLIUSDT'
+  symbol = 'TRUMPUSDT'
   interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
   period_long_short_ratio = '5min'  # Period for Long/Short Ratio (5min 15min 30min 1h 4h 4d)
   intervalTime = '5min'  # Interval Time for Open Interest (5min 15min 30min 1h 4h 1d)
   start_time = datetime(2025, 3, 23)
-  end_time = datetime(2025, 3, 28)
+  end_time = datetime(2025, 4, 2)
 
   download_kline(symbol, interval, start_time, end_time)
   download_funding_rate(symbol, start_time, end_time)

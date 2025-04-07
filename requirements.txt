@@ -19,3 +19,10 @@ optuna
 xgboost
 deap
 gym
+stable-baselines3
+websockets
+ccxt
+winloop
+plotly
+dash
+lightweight-charts

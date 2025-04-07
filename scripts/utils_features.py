@@ -2,11 +2,12 @@ import numpy as np
 import pandas as pd
 
 # **RSI** (14-period as a common choice)
-def calculate_rsi(df, period=14):
-  delta = df['closePrice'].diff()
+def calculate_rsi(df, period=14, column='closePrice'):
+  delta = df[column].diff()
   gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
   loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
   rs = gain / loss
+  rs = rs.fillna(0).replace(np.inf, 0)
   rsi = 100 - (100 / (1 + rs))
   return rsi
 
