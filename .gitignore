@@ -7,3 +7,4 @@ predictions
 __pycache__
 .idea
 .env
+.config.json
