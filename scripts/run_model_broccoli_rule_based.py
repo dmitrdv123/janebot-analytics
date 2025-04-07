@@ -242,17 +242,23 @@ class BybitManager:
             await self.exchange.close()
 
 class BybitListener:
-    async def listen(self, bybit_trader):
-        config = bybit_trader.get_config()
-        symbol = config["symbol"]
-        interval = config["interval"]
-
-        logger.info(f"[BybitListener] Starting listen {symbol} with interval {interval}")
-
-        subscription = {
-            "op": "subscribe",
-            "args": [f"kline.{interval}.{symbol}"]
+    def __init__(self, traders):
+        """Initialize with a list of BybitTrader instances."""
+        self.traders = traders
+        # Map subscription topics to their respective traders
+        self.subscription_map = {
+            f"kline.{trader.get_config()['interval']}.{trader.get_config()['symbol']}": trader
+            for trader in traders
         }
+
+    async def listen(self):
+        """Listen to WebSocket and route messages to the appropriate trader."""
+        subscriptions = [
+            {"op": "subscribe", "args": [topic]}
+            for topic in self.subscription_map.keys()
+        ]
+
+        logger.info(f"[BybitListener] Starting listen for subscriptions: {list(self.subscription_map.keys())}")
 
         max_retries = 10
         base_delay = 1  # Initial delay in seconds
@@ -263,12 +269,15 @@ class BybitListener:
                 async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=10) as websocket:
                     attempt = 0  # Reset attempt counter on successful connection
                     logger.info("[BybitListener] Connected to WebSocket")
-                    await websocket.send(json.dumps(subscription))
-                    logger.info(f"[BybitListener] Subscribed to kline.{interval}.{symbol}")
+
+                    # Send all subscriptions
+                    for subscription in subscriptions:
+                        await websocket.send(json.dumps(subscription))
+                        logger.info(f"[BybitListener] Subscribed to {subscription['args'][0]}")
 
                     while True:
                         message = await websocket.recv()
-                        await bybit_trader.process_message(message)
+                        await self._process_message(message)
 
             except (websockets.exceptions.ConnectionClosed, asyncio.TimeoutError) as e:
                 attempt += 1
@@ -280,11 +289,28 @@ class BybitListener:
                 logger.error(f"[BybitListener] Unexpected error in WebSocket connection: {e}")
                 attempt += 1
                 delay = base_delay * (2 ** (attempt - 1))
-                logger.info(f"[BybitListener]Reconnecting in {delay:.2f} seconds...")
+                logger.info(f"[BybitListener] Reconnecting in {delay:.2f} seconds...")
                 await asyncio.sleep(delay)
 
         logger.error(f"[BybitListener] Max retries ({max_retries}) reached. Giving up on WebSocket connection.")
         raise Exception("WebSocket connection failed after max retries")
+
+    async def _process_message(self, message):
+        """Route the WebSocket message to the appropriate trader based on the subscription topic."""
+        try:
+            data = json.loads(message)
+            if "topic" not in data:
+                logger.debug(f"[BybitListener] Ignoring message without topic: {data}")
+                return
+
+            topic = data["topic"]
+            if topic in self.subscription_map:
+                trader = self.subscription_map[topic]
+                await trader.process_message(message)
+            else:
+                logger.warning(f"[BybitListener] No trader found for topic: {topic}")
+        except Exception as e:
+            logger.error(f"[BybitListener] Failed to process message: {e}")
 
 class BybitTrader:
     def __init__(self, config, bybit_manager, bybit_linear_manager):
@@ -474,7 +500,8 @@ async def main():
     # Initialize bybit managers
     bybit_manager = BybitManager(exchange)
     bybit_linear_manager = BybitLinearManager(bybit_manager)
-    bybit_listener = BybitListener()
+    bybit_traders = [BybitTrader(cfg, bybit_manager, bybit_linear_manager) for cfg in config]
+    bybit_listener = BybitListener(bybit_traders)
 
     # Example usage of position manager with waiting
     # try:
@@ -493,13 +520,12 @@ async def main():
     #     logger.error(f"Error in position management: {e}")
 
     # Iterate over the configuration and create traders
-    traders = [BybitTrader(cfg, bybit_manager, bybit_linear_manager) for cfg in config]
 
     # Init traders
-    await asyncio.gather(*(trader.init() for trader in traders))
+    await asyncio.gather(*(trader.init() for trader in bybit_traders))
 
     # Start listen
-    await asyncio.gather(*(bybit_listener.listen(trader) for trader in traders))
+    await bybit_listener.listen()
 
 if __name__ == "__main__":
     try:
