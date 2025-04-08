@@ -40,6 +40,9 @@ TOKEN_PAIRS = {
     }
 }
 
+# Global lock for position operations across all BybitTrader instances
+position_lock = asyncio.Lock()
+
 class BybitLinearManager:
     def __init__(self, bybit_manager):
         self.bybit_manager = bybit_manager
@@ -245,20 +248,43 @@ class BybitListener:
     def __init__(self, traders):
         """Initialize with a list of BybitTrader instances."""
         self.traders = traders
+
         # Map subscription topics to their respective traders
         self.subscription_map = {
             f"kline.{trader.get_config()['interval']}.{trader.get_config()['symbol']}": trader
             for trader in traders
         }
 
+        # Map subscription topics to their message queues
+        self.message_queues = {topic: asyncio.Queue() for topic in self.subscription_map.keys()}
+        self.worker_tasks = {}  # Track worker tasks per topic
+
+    async def _process_worker(self, topic, trader):
+        """Worker coroutine to process messages sequentially for a given topic."""
+        queue = self.message_queues[topic]
+        while True:
+            try:
+                message = await queue.get()
+                logger.debug(f"[BybitListener] Processing message for {topic}")
+                await trader.process_message(message)
+                queue.task_done()
+                logger.debug(f"[BybitListener] Finished processing message for {topic}")
+            except Exception as e:
+                logger.error(f"[BybitListener] Error processing message for {topic}: {e}")
+
     async def listen(self):
-        """Listen to WebSocket and route messages to the appropriate trader."""
+        """Listen to WebSocket and route messages to queues for sequential processing."""
         subscriptions = [
             {"op": "subscribe", "args": [topic]}
             for topic in self.subscription_map.keys()
         ]
 
         logger.info(f"[BybitListener] Starting listen for subscriptions: {list(self.subscription_map.keys())}")
+
+        # Start worker tasks for each topic
+        for topic, trader in self.subscription_map.items():
+            self.worker_tasks[topic] = asyncio.create_task(self._process_worker(topic, trader))
+            logger.info(f"[BybitListener] Started worker for {topic}")
 
         max_retries = 10
         base_delay = 1  # Initial delay in seconds
@@ -277,7 +303,7 @@ class BybitListener:
 
                     while True:
                         message = await websocket.recv()
-                        await self._process_message(message)
+                        self._enqueue_message(message)
 
             except (websockets.exceptions.ConnectionClosed, asyncio.TimeoutError) as e:
                 attempt += 1
@@ -293,10 +319,15 @@ class BybitListener:
                 await asyncio.sleep(delay)
 
         logger.error(f"[BybitListener] Max retries ({max_retries}) reached. Giving up on WebSocket connection.")
+
+        # Cancel all worker tasks on shutdown
+        for task in self.worker_tasks.values():
+            task.cancel()
+
         raise Exception("WebSocket connection failed after max retries")
 
-    async def _process_message(self, message):
-        """Route the WebSocket message to the appropriate trader based on the subscription topic."""
+    def _enqueue_message(self, message):
+        """Add the WebSocket message to the appropriate topic's queue."""
         try:
             data = json.loads(message)
             if "topic" not in data:
@@ -304,16 +335,18 @@ class BybitListener:
                 return
 
             topic = data["topic"]
-            if topic in self.subscription_map:
-                trader = self.subscription_map[topic]
-                await trader.process_message(message)
-            else:
+            if topic not in self.subscription_map:
                 logger.warning(f"[BybitListener] No trader found for topic: {topic}")
+                return
+
+            queue = self.message_queues[topic]
+            queue.put_nowait(message)
+            logger.debug(f"[BybitListener] Enqueued message for {topic}, queue size: {queue.qsize()}")
         except Exception as e:
-            logger.error(f"[BybitListener] Failed to process message: {e}")
+            logger.error(f"[BybitListener] Failed to enqueue message: {e}")
 
 class BybitTrader:
-    def __init__(self, config, bybit_manager, bybit_linear_manager):
+    def __init__(self, config, bybit_manager, bybit_linear_manager, position_lock=position_lock):
         self.config = config
         self.token_pair = TOKEN_PAIRS[config["symbol"]]
 
@@ -328,6 +361,7 @@ class BybitTrader:
 
         self.position = None
         self.position_timestamp = None
+        self.position_lock = position_lock
 
     def get_config(self):
         return self.config
@@ -426,15 +460,9 @@ class BybitTrader:
         if not self.position:
             shouldOpen = price_diff > self.config["close_diff_open_threshold"] and rsi > self.config["rsi_open_threshold"]
             if shouldOpen:
-                balance = await self.bybit_manager.balance()
-                balance_min_rest = float(os.getenv("BALANCE_MIN_REST"))
-                balance_token_amount = (balance - balance_min_rest) / price
-                token_amount = min(self.config["amount_open"], balance_token_amount)
-
-                qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
-                if qty >= self.token_pair["min_amount"]:
-                    self.position = await self.bybit_linear_manager.short_open(self.config["symbol"], qty)
-                    self.position_timestamp = self.position["timestamp"] if self.position else None
+                async with self.position_lock:
+                    await self._open_position(price)
+                return
         else:
             self.position = await self.bybit_linear_manager.short_status(self.config["symbol"])
 
@@ -452,21 +480,41 @@ class BybitTrader:
                 or duration > self.config["max_duration"]
             shouldClose = True
             if shouldClose:
-                self.position = await self.bybit_linear_manager.short_close(self.config["symbol"], current_qty)
-                self.position_timestamp = None
+                async with self.position_lock:
+                    await self._close_position(current_qty)
                 return
 
             shouldIncrease = price_diff > self.config["close_diff_increase_threshold"] and rsi > self.config["rsi_increase_threshold"]
             if shouldIncrease:
-                balance = await self.bybit_manager.balance()
-                balance_min_rest = float(os.getenv("BALANCE_MIN_REST"))
-                balance_token_amount = (balance - balance_min_rest) / price
-                token_amount = min(self.config["amount_increase"], balance_token_amount)
+                async with self.position_lock:
+                    await self._increase_position(price)
+                return
 
-                qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
-                if qty >= self.token_pair["min_amount"]:
-                    self.position = await self.bybit_linear_manager.short_open(self.config["symbol"], qty)
-                    return
+    async def _open_position(self, price):
+        balance = await self.bybit_manager.balance()
+        balance_min_rest = float(os.getenv("BALANCE_MIN_REST"))
+        balance_token_amount = (balance - balance_min_rest) / price
+        token_amount = min(self.config["amount_open"], balance_token_amount)
+
+        qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
+        if qty >= self.token_pair["min_amount"]:
+            self.position = await self.bybit_linear_manager.short_open(self.config["symbol"], qty)
+            self.position_timestamp = self.position["timestamp"] if self.position else None
+
+    async def _increase_position(self, price):
+        balance = await self.bybit_manager.balance()
+        balance_min_rest = float(os.getenv("BALANCE_MIN_REST"))
+        balance_token_amount = (balance - balance_min_rest) / price
+        token_amount = min(self.config["amount_increase"], balance_token_amount)
+
+        qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
+        if qty >= self.token_pair["min_amount"]:
+            self.position = await self.bybit_linear_manager.short_open(self.config["symbol"], qty)
+            return
+
+    async def _close_position(self, qty):
+        self.position = await self.bybit_linear_manager.short_close(self.config["symbol"], qty)
+        self.position_timestamp = None
 
 async def main():
     api_key = os.getenv("BYBIT_API_KEY")
