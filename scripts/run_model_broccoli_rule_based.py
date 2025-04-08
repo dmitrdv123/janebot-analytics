@@ -346,9 +346,10 @@ class BybitListener:
             logger.error(f"[BybitListener] Failed to enqueue message: {e}")
 
 class BybitTrader:
-    def __init__(self, config, bybit_manager, bybit_linear_manager, position_lock=position_lock):
+    def __init__(self, config, bybit_manager, bybit_linear_manager, balance_min_rest, position_lock=position_lock):
         self.config = config
         self.token_pair = TOKEN_PAIRS[config["symbol"]]
+        self.balance_min_rest = balance_min_rest
 
         self.df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
         self.df_features = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover", "close_diff", "rsi"])
@@ -492,8 +493,7 @@ class BybitTrader:
 
     async def _open_position(self, price):
         balance = await self.bybit_manager.balance()
-        balance_min_rest = float(os.getenv("BALANCE_MIN_REST"))
-        balance_token_amount = (balance - balance_min_rest) / price
+        balance_token_amount = (balance - self.balance_min_rest) / price
         token_amount = min(self.config["amount_open"], balance_token_amount)
 
         qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
@@ -503,8 +503,7 @@ class BybitTrader:
 
     async def _increase_position(self, price):
         balance = await self.bybit_manager.balance()
-        balance_min_rest = float(os.getenv("BALANCE_MIN_REST"))
-        balance_token_amount = (balance - balance_min_rest) / price
+        balance_token_amount = (balance - self.balance_min_rest) / price
         token_amount = min(self.config["amount_increase"], balance_token_amount)
 
         qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
@@ -520,12 +519,10 @@ async def main():
     api_key = os.getenv("BYBIT_API_KEY")
     api_secret = os.getenv("BYBIT_API_SECRET")
     demo_trading = os.getenv("BYBIT_DEMO", "false").lower() == "true"
-    if not api_key or not api_secret:
-        logger.error("API key and secret must be set in environment variables")
-        return
-    
-    # Load configuration from a JSON file
+    balance_min_rest = float(os.getenv("BALANCE_MIN_REST"))
     config_file_path = os.getenv("CONFIG_FILE_PATH", ".config.json")
+
+    # Load configuration from a JSON file
     try:
         with open(config_file_path, "r") as config_file:
             config = json.load(config_file)
@@ -548,7 +545,7 @@ async def main():
     # Initialize bybit managers
     bybit_manager = BybitManager(exchange)
     bybit_linear_manager = BybitLinearManager(bybit_manager)
-    bybit_traders = [BybitTrader(cfg, bybit_manager, bybit_linear_manager) for cfg in config]
+    bybit_traders = [BybitTrader(cfg, bybit_manager, bybit_linear_manager, balance_min_rest) for cfg in config]
     bybit_listener = BybitListener(bybit_traders)
 
     # Example usage of position manager with waiting
