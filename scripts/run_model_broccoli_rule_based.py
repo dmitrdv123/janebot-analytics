@@ -363,9 +363,6 @@ class BybitTrader:
         self.position_timestamp = None
         self.position_lock = position_lock
 
-    def get_config(self):
-        return self.config
-
     async def init(self):
         await self.bybit_manager.order_cancel_all(self.config["symbol"])
 
@@ -388,6 +385,9 @@ class BybitTrader:
             self.last_timestamp = self.df["timestamp"].iloc[-1]
 
         self._calc_features()
+
+    def get_config(self):
+        return self.config
 
     async def process_message(self, message):
         try:
