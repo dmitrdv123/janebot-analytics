@@ -5,7 +5,7 @@ import logging
 import os
 import pandas as pd
 import sys
-import websockets
+import functools
 
 from datetime import datetime
 from dotenv import load_dotenv
@@ -27,9 +27,7 @@ logger = logging.getLogger(__name__)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-# Настройки
-WS_URL = "wss://stream.bybit.com/v5/public/linear"
-
+# Settings
 MARKET_TYPE = "linear"  # Perpetual futures
 
 TOKEN_PAIRS = {
@@ -61,6 +59,29 @@ TOKEN_PAIRS = {
 
 # Global lock for position operations across all BybitTrader instances
 position_lock = asyncio.Lock()
+
+def retry(max_retries=3, delay=1, backoff=2, retry_on=(Exception,)):
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            retries = 0
+            current_delay = delay
+            while retries < max_retries:
+                try:
+                    return await func(*args, **kwargs)
+                except retry_on as e:
+                    retries += 1
+                    if retries >= max_retries:
+                        logging.error(f"Failed {func.__name__} after {max_retries} retries: {e}")
+                        raise
+                    logging.warning(f"Retry {retries}/{max_retries} for {func.__name__}: {e}")
+                    await asyncio.sleep(current_delay)
+                    current_delay *= backoff
+                except Exception as e:
+                    logging.error(f"Unexpected error in {func.__name__}: {e}")
+                    raise
+        return wrapper
+    return decorator
 
 class BybitLinearManager:
     def __init__(self, bybit_manager):
@@ -119,6 +140,7 @@ class BybitManager:
     def __init__(self, exchange):
         self.exchange = exchange
 
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
     async def linear_sell(self, symbol, quantity):
         """Create linear sell order with the specified quantity."""
         try:
@@ -139,9 +161,8 @@ class BybitManager:
         except Exception as e:
             logger.error(f"[BybitManager] Failed to create linear sell order for {quantity} {symbol}: {e}")
             raise
-        finally:
-            await self.exchange.close()
 
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
     async def linear_buy(self, symbol, quantity):
         """Create linear buy order with the specified quantity."""
         try:
@@ -163,9 +184,8 @@ class BybitManager:
         except Exception as e:
             logger.error(f"[BybitManager] Failed to create linear buy order for {quantity} {symbol}: {e}")
             raise
-        finally:
-            await self.exchange.close()
 
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
     async def linear_status(self, symbol):
         """Retrieve information about the current position for the symbol."""
         try:
@@ -178,9 +198,8 @@ class BybitManager:
         except Exception as e:
             logger.error(f"[BybitManager] Failed to fetch linear status for {symbol}: {e}")
             raise
-        finally:
-            await self.exchange.close()
 
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
     async def order_status(self, symbol, order_id):
         """Get order status."""
         try:
@@ -193,9 +212,8 @@ class BybitManager:
         except Exception as e:
             logger.error(f"[BybitManager] Failed to get order status for {order_id}: {e}")
             raise
-        finally:
-            await self.exchange.close()
 
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
     async def order_cancel(self, symbol, order_id):
         """Cancel order."""
         try:
@@ -213,9 +231,8 @@ class BybitManager:
 
             logger.error(f"[BybitManager] Failed to cancel order {order_id}: {e}")
             raise
-        finally:
-            await self.exchange.close()
 
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
     async def order_cancel_all(self, symbol):
         """Cancel all orders."""
         try:
@@ -228,9 +245,8 @@ class BybitManager:
         except Exception as e:
             logger.error(f"[BybitManager] Failed to cancel all orders for {symbol}: {e}")
             raise
-        finally:
-            await self.exchange.close()
 
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
     async def balance(self):
         """Fetch the available USDT balance for the Unified Account."""
         try:
@@ -246,123 +262,36 @@ class BybitManager:
         except Exception as e:
             logger.error(f"[BybitManager] Failed to get balance: {e}")
             raise
-        finally:
-            await self.exchange.close()
 
-    async def kline_load(self, symbol, interval, period):
+    @retry(max_retries=3, delay=1, backoff=2, retry_on=(ccxt.NetworkError, ccxt.RateLimitExceeded))
+    async def kline_load(self, symbol, interval, start, end):
         """Load KLines."""
         try:
-            return await self.exchange.fetch_ohlcv(
-                symbol=symbol,
-                timeframe=f"{interval}m",
-                limit=period
-            )
+            # Split the time range into hourly intervals
+            hourly_intervals = []
+            current_start = start
+            while current_start < end:
+                current_end = min(current_start + 3600 * 1000, end)  # 3600 * 1000 ms = 1 hour
+                hourly_intervals.append((current_start, current_end))
+                current_start = current_end
+
+            # Fetch OHLCV data for each interval and concatenate results
+            all_ohlcv = []
+            for interval_start, interval_end in hourly_intervals:
+                ohlcv = await self.exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=f"{interval}m",
+                    since=interval_start,
+                    params={"endTime": interval_end}
+                )
+                all_ohlcv.extend(ohlcv)
+
+            logger.info(f"[BybitManager] End to load kline for {symbol} from {start} to {end}: {len(all_ohlcv)} records.")
+
+            return all_ohlcv
         except Exception as e:
             logger.error(f"[BybitManager] Failed to load KLines for {symbol}: {e}")
             raise
-        finally:
-            await self.exchange.close()
-
-class BybitListener:
-    def __init__(self, traders):
-        """Initialize with a list of BybitTrader instances."""
-        self.traders = traders
-
-        # Map subscription topics to their respective traders
-        self.subscription_map = {
-            f"kline.{trader.get_config()['interval']}.{trader.get_config()['symbol']}": trader
-            for trader in traders
-        }
-
-        # Map subscription topics to their message queues
-        self.message_queues = {topic: asyncio.Queue() for topic in self.subscription_map.keys()}
-        self.worker_tasks = {}  # Track worker tasks per topic
-
-    async def _process_worker(self, topic, trader):
-        """Worker coroutine to process messages sequentially for a given topic."""
-        queue = self.message_queues[topic]
-        while True:
-            try:
-                message = await queue.get()
-                logger.debug(f"[BybitListener] Processing message for {topic}")
-                await trader.process_message(message)
-                queue.task_done()
-                logger.debug(f"[BybitListener] Finished processing message for {topic}")
-            except Exception as e:
-                logger.error(f"[BybitListener] Error processing message for {topic}: {e}")
-
-    async def listen(self):
-        """Listen to WebSocket and route messages to queues for sequential processing."""
-        subscriptions = [
-            {"op": "subscribe", "args": [topic]}
-            for topic in self.subscription_map.keys()
-        ]
-
-        logger.info(f"[BybitListener] Starting listen for subscriptions: {list(self.subscription_map.keys())}")
-
-        # Start worker tasks for each topic
-        for topic, trader in self.subscription_map.items():
-            self.worker_tasks[topic] = asyncio.create_task(self._process_worker(topic, trader))
-            logger.info(f"[BybitListener] Started worker for {topic}")
-
-        max_retries = 10
-        base_delay = 1  # Initial delay in seconds
-        attempt = 0
-
-        while attempt < max_retries:
-            try:
-                async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=10) as websocket:
-                    attempt = 0  # Reset attempt counter on successful connection
-                    logger.info("[BybitListener] Connected to WebSocket")
-
-                    # Send all subscriptions
-                    for subscription in subscriptions:
-                        await websocket.send(json.dumps(subscription))
-                        logger.info(f"[BybitListener] Subscribed to {subscription['args'][0]}")
-
-                    while True:
-                        message = await websocket.recv()
-                        self._enqueue_message(message)
-
-            except (websockets.exceptions.ConnectionClosed, asyncio.TimeoutError) as e:
-                attempt += 1
-                delay = base_delay * (2 ** (attempt - 1))  # Exponential backoff
-                logger.warning(f"[BybitListener] WebSocket connection failed (attempt {attempt}/{max_retries}): {e}")
-                logger.info(f"[BybitListener] Reconnecting in {delay:.2f} seconds...")
-                await asyncio.sleep(delay)
-            except Exception as e:
-                logger.error(f"[BybitListener] Unexpected error in WebSocket connection: {e}")
-                attempt += 1
-                delay = base_delay * (2 ** (attempt - 1))
-                logger.info(f"[BybitListener] Reconnecting in {delay:.2f} seconds...")
-                await asyncio.sleep(delay)
-
-        logger.error(f"[BybitListener] Max retries ({max_retries}) reached. Giving up on WebSocket connection.")
-
-        # Cancel all worker tasks on shutdown
-        for task in self.worker_tasks.values():
-            task.cancel()
-
-        raise Exception("WebSocket connection failed after max retries")
-
-    def _enqueue_message(self, message):
-        """Add the WebSocket message to the appropriate topic's queue."""
-        try:
-            data = json.loads(message)
-            if "topic" not in data:
-                logger.debug(f"[BybitListener] Ignoring message without topic: {data}")
-                return
-
-            topic = data["topic"]
-            if topic not in self.subscription_map:
-                logger.warning(f"[BybitListener] No trader found for topic: {topic}")
-                return
-
-            queue = self.message_queues[topic]
-            queue.put_nowait(message)
-            logger.debug(f"[BybitListener] Enqueued message for {topic}, queue size: {queue.qsize()}")
-        except Exception as e:
-            logger.error(f"[BybitListener] Failed to enqueue message: {e}")
 
 class BybitTrader:
     def __init__(self, config, bybit_manager, bybit_linear_manager, balance_min_rest, position_lock=position_lock):
@@ -370,131 +299,157 @@ class BybitTrader:
         self.token_pair = TOKEN_PAIRS[config["symbol"]]
         self.balance_min_rest = balance_min_rest
 
-        self.df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover"])
-        self.df_features = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "turnover", "close_diff", "rsi"])
+        self.df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        self.df_features = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume", "close_diff", "rsi"])
 
         self.bybit_manager = bybit_manager
         self.bybit_linear_manager = bybit_linear_manager
 
-        self.last_timestamp = None  # Track the timestamp of the last processed kline
-
         self.position = None
-        self.position_timestamp = None
+        self.position_created_timestamp = None
+        self.position_updated_timestamp = None
         self.position_lock = position_lock
 
     async def init(self):
         await self.bybit_manager.order_cancel_all(self.config["symbol"])
 
         self.position = await self.bybit_linear_manager.short_status(self.config["symbol"])
-        self.position_timestamp = self.position["timestamp"] if self.position else None
+        self.position_created_timestamp = self.position["lastUpdateTimestamp"] if self.position else None
+        self.position_updated_timestamp = self.position_created_timestamp
 
-        klines = await self.bybit_manager.kline_load(self.config["symbol"], self.config["interval"], 2 * self.config["period"])
-        for kline in klines:
-            self.df = pd.concat([self.df, pd.DataFrame({
-                "timestamp": [kline[0]],
-                "open": [float(kline[1])],
-                "high": [float(kline[2])],
-                "low": [float(kline[3])],
-                "close": [float(kline[4])],
-                "volume": [float(kline[5])],
-                "turnover": [0.0]
-            })], ignore_index=True)
+        now = int(datetime.now().timestamp() * 1000)
+        self.df = await self._load_data(now - 2 * self.config["max_duration"], now)
+        self.df_features = self._calc_features(self.df)
 
-        if not self.df.empty:
-            self.last_timestamp = self.df["timestamp"].iloc[-1]
+    async def run(self):
+        """Poll Bybit API for the last ended period's kline data, checking if already processed."""
+        while True:
+            # Sleep for 1 second
+            await asyncio.sleep(1)
 
-        self._calc_features()
+            try:
+                last_complete_period_timestamp = self._last_complete_period_timestamp()
+                last_timestamp = self.df["timestamp"].iloc[-1] if not self.df.empty else 0
 
-    def get_config(self):
-        return self.config
+                # Check for new closed period
+                if last_complete_period_timestamp <= last_timestamp:
+                    logger.debug(f"[BybitTrader] [{self.config['symbol']}] Last period {datetime.fromtimestamp(last_complete_period_timestamp / 1000)} already processed")
+                    continue
 
-    async def process_message(self, message):
+                # Load and concatenate new data with existing dataframe, overwriting by timestamp
+                now = int(datetime.now().timestamp() * 1000)
+                df = await self._load_data(last_timestamp + 1, now)
+                self.df = pd.concat([self.df, df]).drop_duplicates(subset=["timestamp"], keep="last").sort_values(by="timestamp").reset_index(drop=True)
+
+                # Filter self.df by timestamp
+                self.df = self.df[self.df["timestamp"] >= now - 2 * self.config["max_duration"]]
+
+                # Calc features
+                self.df_features = self._calc_features(self.df)
+
+                await self._update_position()
+
+                logger.info(f"[BybitTrader] [{self.config['symbol']}] End to process data for: {datetime.fromtimestamp(last_complete_period_timestamp / 1000)}")
+            except Exception as e:
+                logger.exception(f"[BybitTrader] [{self.config['symbol']}] Failed to process data: {e}")
+
+    def _last_complete_period_timestamp(self):
+        seconds_since_epoch = datetime.now().timestamp()
+
+        interval_seconds = int(self.config["interval"]) * 60  # Interval in seconds (e.g., 300 for 5m)
+        last_period_end = int(seconds_since_epoch // interval_seconds) * interval_seconds  # End of last period in seconds
+        last_period_start = last_period_end - interval_seconds  # Start of last period in seconds
+        last_period_start_ms = int(last_period_start * 1000)  # Convert to milliseconds
+
+        return last_period_start_ms
+
+    async def _load_data(self, start, end):
         try:
-            data = json.loads(message)
-            if not ("data" in data and data["type"] == "snapshot"):
-                return
+            klines = await self.bybit_manager.kline_load(self.config["symbol"], self.config["interval"], start, end)
+            last_complete_period_timestamp = self._last_complete_period_timestamp()
 
-            kline = data["data"][0]
+            df_new = pd.DataFrame([
+                {
+                    "timestamp": int(kline[0]),
+                    "open": float(kline[1]),
+                    "high": float(kline[2]),
+                    "low": float(kline[3]),
+                    "close": float(kline[4]),
+                    "volume": float(kline[5]),
+                }
+                for kline in klines if int(kline[0]) <= last_complete_period_timestamp
+            ])
 
-            timestamp = int(kline["start"])
-            if timestamp == self.last_timestamp:
-                return
-
-            # Create a temporary DataFrame for the incoming kline
-            new_kline = pd.DataFrame({
-                "timestamp": [timestamp],
-                "open": [float(kline["open"])],
-                "high": [float(kline["high"])],
-                "low": [float(kline["low"])],
-                "close": [float(kline["close"])],
-                "volume": [float(kline["volume"])],
-                "turnover": [float(kline["turnover"])]
-            })
-
-            # The previous interval has ended; append the last stored kline as finalized
-            logger.info(f"[BybitTrader] [{self.config['symbol']}] Interval ended, adding kline: {datetime.fromtimestamp(self.last_timestamp/1000)}")
-            self.df = pd.concat([self.df, new_kline], ignore_index=True)
-
-            # Trim DataFrame to keep only 2 RSI_PERIOD entries
-            if len(self.df) > 2 * self.config["period"]:
-                self.df = self.df.iloc[-2 * self.config["period"]:]
-
-            # Update last_timestamp
-            self.last_timestamp = timestamp
-
-            # Calculate indicators for the finalized kline
-            self._calc_features()
-
-            # Open, close, increase position
-            await self._update_position()
-
-            logger.info(f"[BybitTrader] [{self.config['symbol']}] Started new interval: {datetime.fromtimestamp(self.last_timestamp / 1000)}")
+            if df_new.empty:
+                logger.warning(f"[BybitTrader] [{self.config['symbol']}] No new klines fetched from {start} to {end}")
+            elif df_new["timestamp"].min() < start:
+                logger.warning(f"[BybitTrader] [{self.config['symbol']}] Fetched klines earlier than requested start time")
+            return df_new
         except Exception as e:
-            logger.error(f"[BybitTrader] [{self.config['symbol']}] Failed to process: {e}")
+            logger.error(f"[BybitTrader] [{self.config['symbol']}] Failed to load data: {e}")
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
 
-    def _calc_features(self):
-        self.df_features = self.df.copy()
+    def _calc_features(self, df):
+        df_features = df.copy()
 
-        self.df_features["close_diff"] = self.df_features["close"].pct_change(periods=self.config["period"])  # 1 hour = 12 periods
-        self.df_features["rsi"] = calculate_rsi(self.df_features, period=self.config["period"], column="close")  # 1 hour = 12 periods
+        df_features["close_diff"] = df_features["close"].pct_change(periods=self.config["period"])
+        df_features["rsi"] = calculate_rsi(df_features, period=self.config["period"], column="close")
+
+        return df_features
 
     async def _update_position(self):
+        if self.df_features.empty:
+            logger.warning(f"[BybitTrader] [{self.config['symbol']}] No features data available")
+            return
+
         current_row = self.df_features.iloc[-1]
         price = current_row["close"]
         price_diff = current_row["close_diff"]
         rsi = current_row["rsi"]
 
         if not self.position:
-            shouldOpen = price_diff > self.config["close_diff_open_threshold"] and rsi > self.config["rsi_open_threshold"]
-            if shouldOpen:
+            should_open = price_diff > self.config["close_diff_open_threshold"] and rsi > self.config["rsi_open_threshold"]
+            if should_open:
                 async with self.position_lock:
                     await self._open_position(price)
-                return
         else:
+            # Refresh position status
             self.position = await self.bybit_linear_manager.short_status(self.config["symbol"])
+            if not self.position:
+                logger.warning(f"[BybitTrader] [{self.config['symbol']}] Position closed externally")
+                self.position_created_timestamp = None
+                self.position_updated_timestamp = None
+                return
 
             current_timestamp = int(datetime.now().timestamp() * 1000)
+            gross_profit = self.position.get("unrealizedPnl", 0)
+            realized_pnl = float(self.position["info"].get("curRealisedPnl", 0))
+            initial_margin = self.position.get("initialMargin", 0)
+            current_qty = self.position.get("contracts", 0)
 
-            gross_profit = self.position["unrealizedPnl"]
-            realized_pnl = float(self.position["info"]["curRealisedPnl"])
-            initial_margin = self.position["initialMargin"]
-            current_qty = self.position["contracts"]
+            profit = (gross_profit + realized_pnl) / initial_margin if initial_margin != 0 else 0
+            duration = current_timestamp - self.position_created_timestamp if self.position_created_timestamp else 0
 
-            profit = (gross_profit + realized_pnl) / initial_margin
-            duration = current_timestamp - self.position_timestamp
-
-            shouldClose = (rsi < self.config["rsi_close_threshold"] and profit > self.config["profit_min"]) \
+            should_close = (rsi < self.config["rsi_close_threshold"] and profit > self.config["profit_min"]) \
                 or duration > self.config["max_duration"]
-            if shouldClose:
+            if should_close:
                 async with self.position_lock:
                     await self._close_position(current_qty)
                 return
 
-            shouldIncrease = price_diff > self.config["close_diff_increase_threshold"] and rsi > self.config["rsi_increase_threshold"]
-            if shouldIncrease:
+            # Find the closest record in self.df_features by self.position_updated_timestamp
+            interval_ms = self.config["interval"] * 60 * 1000  # Convert interval to milliseconds
+            closest_record = self.df_features[
+                (self.df_features["timestamp"] > self.position_updated_timestamp - interval_ms) &
+                (self.df_features["timestamp"] < self.position_updated_timestamp + interval_ms)
+            ]
+            closest_record = closest_record.iloc[-1] if not closest_record.empty else None
+            price_diff_since_update = price - closest_record["close"] if closest_record is not None else 0
+
+            should_increase = price_diff_since_update > self.config["close_diff_increase_threshold"] and rsi > self.config["rsi_increase_threshold"]
+            if should_increase:
                 async with self.position_lock:
                     await self._increase_position(price)
-                return
 
     async def _open_position(self, price):
         balance = await self.bybit_manager.balance()
@@ -504,7 +459,8 @@ class BybitTrader:
         qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
         if qty >= self.token_pair["min_amount"]:
             self.position = await self.bybit_linear_manager.short_open(self.config["symbol"], qty)
-            self.position_timestamp = self.position["timestamp"] if self.position else None
+            self.position_created_timestamp = self.position["lastUpdateTimestamp"] if self.position else None
+            self.position_updated_timestamp = self.position_created_timestamp
 
     async def _increase_position(self, price):
         balance = await self.bybit_manager.balance()
@@ -514,11 +470,13 @@ class BybitTrader:
         qty = float(f"{token_amount:.{self.token_pair['precision_amount']}f}")
         if qty >= self.token_pair["min_amount"]:
             self.position = await self.bybit_linear_manager.short_open(self.config["symbol"], qty)
+            self.self.position_updated_timestamp = self.position["lastUpdateTimestamp"] if self.position else None
             return
 
     async def _close_position(self, qty):
         self.position = await self.bybit_linear_manager.short_close(self.config["symbol"], qty)
-        self.position_timestamp = None
+        self.position_created_timestamp = None
+        self.position_updated_timestamp = None
 
 async def main():
     api_key = os.getenv("BYBIT_API_KEY")
@@ -551,7 +509,6 @@ async def main():
     bybit_manager = BybitManager(exchange)
     bybit_linear_manager = BybitLinearManager(bybit_manager)
     bybit_traders = [BybitTrader(cfg, bybit_manager, bybit_linear_manager, balance_min_rest) for cfg in config]
-    bybit_listener = BybitListener(bybit_traders)
 
     # Example usage of position manager with waiting
     # try:
@@ -569,12 +526,15 @@ async def main():
     # except Exception as e:
     #     logger.error(f"Error in position management: {e}")
 
-    # Init traders
-    for trader in bybit_traders:
-        await trader.init()
+    try:
+        # Initialize traders
+        for trader in bybit_traders:
+            await trader.init()
 
-    # Start listen
-    await bybit_listener.listen()
+        # Start polling for each trader concurrently
+        await asyncio.gather(*(trader.run() for trader in bybit_traders))
+    finally:
+        await exchange.close()  # Ensure the exchange connection is closed
 
 if __name__ == "__main__":
     try:
