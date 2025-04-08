@@ -479,7 +479,6 @@ class BybitTrader:
 
             shouldClose = (rsi < self.config["rsi_close_threshold"] and profit > self.config["profit_min"]) \
                 or duration > self.config["max_duration"]
-            shouldClose = True
             if shouldClose:
                 async with self.position_lock:
                     await self._close_position(current_qty)
