@@ -376,7 +376,6 @@ class BybitTrader:
         self.bybit_manager = bybit_manager
         self.bybit_linear_manager = bybit_linear_manager
 
-        self.current_kline = None  # Store the latest kline data temporarily
         self.last_timestamp = None  # Track the timestamp of the last processed kline
 
         self.position = None
@@ -416,7 +415,10 @@ class BybitTrader:
                 return
 
             kline = data["data"][0]
+
             timestamp = int(kline["start"])
+            if timestamp == self.last_timestamp:
+                return
 
             # Create a temporary DataFrame for the incoming kline
             new_kline = pd.DataFrame({
@@ -429,39 +431,24 @@ class BybitTrader:
                 "turnover": [float(kline["turnover"])]
             })
 
-            # If this is the first kline after historical data
-            if self.current_kline is None:
-                self.current_kline = new_kline
-                logger.info(f"[BybitTrader] [{self.config['symbol']}] Received first kline for current interval: {datetime.fromtimestamp(timestamp/1000)}")
-                return
+            # The previous interval has ended; append the last stored kline as finalized
+            logger.info(f"[BybitTrader] [{self.config['symbol']}] Interval ended, adding kline: {datetime.fromtimestamp(self.last_timestamp/1000)}")
+            self.df = pd.concat([self.df, new_kline], ignore_index=True)
 
-            # Check if the timestamp has changed (new interval started)
-            if timestamp != self.current_kline["timestamp"].iloc[0]:
-                # The previous interval has ended; append the last stored kline as finalized
-                logger.info(f"[BybitTrader] [{self.config['symbol']}] Interval ended, adding kline: {datetime.fromtimestamp(self.current_kline['timestamp'].iloc[0]/1000)}")
-                self.df = pd.concat([self.df, self.current_kline], ignore_index=True)
+            # Trim DataFrame to keep only 2 RSI_PERIOD entries
+            if len(self.df) > 2 * self.config["period"]:
+                self.df = self.df.iloc[-2 * self.config["period"]:]
 
-                # Trim DataFrame to keep only 2 RSI_PERIOD entries
-                if len(self.df) > 2 * self.config["period"]:
-                    self.df = self.df.iloc[-2 * self.config["period"]:]
+            # Update last_timestamp
+            self.last_timestamp = timestamp
 
-                # Update last_timestamp
-                self.last_timestamp = self.current_kline["timestamp"].iloc[0]
+            # Calculate indicators for the finalized kline
+            self._calc_features()
 
-                # Store the new kline as the current one
-                self.current_kline = new_kline
+            # Open, close, increase position
+            await self._update_position()
 
-                # Calculate indicators for the finalized kline
-                self._calc_features()
-
-                # Open, close, increase position
-                await self._update_position()
-
-                logger.info(f"[BybitTrader] [{self.config['symbol']}] Started new interval: {datetime.fromtimestamp(timestamp / 1000)}")
-            else:
-                # Same interval; update current_kline with the latest data
-                self.current_kline = new_kline
-                logger.debug(f"[BybitTrader] [{self.config['symbol']}] Updated current interval data: {datetime.fromtimestamp(timestamp / 1000)}")
+            logger.info(f"[BybitTrader] [{self.config['symbol']}] Started new interval: {datetime.fromtimestamp(self.last_timestamp / 1000)}")
         except Exception as e:
             logger.error(f"[BybitTrader] [{self.config['symbol']}] Failed to process: {e}")
 
