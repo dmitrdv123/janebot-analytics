@@ -28,13 +28,32 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Настройки
-WS_URL = "wss://stream.bybit.com/v5/public/spot"
+WS_URL = "wss://stream.bybit.com/v5/public/linear"
 
 MARKET_TYPE = "linear"  # Perpetual futures
 
 TOKEN_PAIRS = {
+    "BROCCOLIUSDT": {
+        "precision_amount": 0,
+        "min_amount": 300,
+    },
+    "TRUMPUSDT": {
+        "precision_amount": 0,
+        "min_amount": 1,
+    },
+    "MELANIAUSDT": {
+        "precision_amount": 0,
+        "min_amount": 15,
+    },
+    "FARTCOINUSDT": {
+        "precision_amount": 0,
+        "min_amount": 15,
+    },
+    "MUBARAKUSDT": {
+        "precision_amount": 0,
+        "min_amount": 200,
+    },
     "BTCUSDT": {
-        "decimals": 8,
         "precision_amount": 3,
         "min_amount": 0.001,
     }
@@ -413,13 +432,13 @@ class BybitTrader:
             # If this is the first kline after historical data
             if self.current_kline is None:
                 self.current_kline = new_kline
-                logger.info(f"[BybitTrader] Received first kline for current interval: {datetime.fromtimestamp(timestamp/1000)}")
+                logger.info(f"[BybitTrader] [{self.config['symbol']}] Received first kline for current interval: {datetime.fromtimestamp(timestamp/1000)}")
                 return
 
             # Check if the timestamp has changed (new interval started)
             if timestamp != self.current_kline["timestamp"].iloc[0]:
                 # The previous interval has ended; append the last stored kline as finalized
-                logger.info(f"[BybitTrader] Interval ended, adding kline: {datetime.fromtimestamp(self.current_kline['timestamp'].iloc[0]/1000)}")
+                logger.info(f"[BybitTrader] [{self.config['symbol']}] Interval ended, adding kline: {datetime.fromtimestamp(self.current_kline['timestamp'].iloc[0]/1000)}")
                 self.df = pd.concat([self.df, self.current_kline], ignore_index=True)
 
                 # Trim DataFrame to keep only 2 RSI_PERIOD entries
@@ -438,13 +457,13 @@ class BybitTrader:
                 # Open, close, increase position
                 await self._update_position()
 
-                logger.info(f"[BybitTrader] Started new interval: {datetime.fromtimestamp(timestamp / 1000)}")
+                logger.info(f"[BybitTrader] [{self.config['symbol']}] Started new interval: {datetime.fromtimestamp(timestamp / 1000)}")
             else:
                 # Same interval; update current_kline with the latest data
                 self.current_kline = new_kline
-                logger.debug(f"[BybitTrader] Updated current interval data: {datetime.fromtimestamp(timestamp / 1000)}")
+                logger.debug(f"[BybitTrader] [{self.config['symbol']}] Updated current interval data: {datetime.fromtimestamp(timestamp / 1000)}")
         except Exception as e:
-            logger.error(f"[BybitTrader] Failed to process: {e}")
+            logger.error(f"[BybitTrader] [{self.config['symbol']}] Failed to process: {e}")
 
     def _calc_features(self):
         self.df_features = self.df.copy()
@@ -563,10 +582,9 @@ async def main():
     # except Exception as e:
     #     logger.error(f"Error in position management: {e}")
 
-    # Iterate over the configuration and create traders
-
     # Init traders
-    await asyncio.gather(*(trader.init() for trader in bybit_traders))
+    for trader in bybit_traders:
+        await trader.init()
 
     # Start listen
     await bybit_listener.listen()
