@@ -116,7 +116,6 @@ def run_bot(df, amount, fee_open, fee_close, params, start_idx=0, end_idx=None):
           continue
 
       # Increase position if necessary
-      zscore_1h = current_row['zscore_1h']
       closePrice_pct_change_since_open = (price_close_cur - position_prices[-1]) / price_close_cur
       position_amount_increase = min(amount * params['position_amount_increase'], total_amount)
       if position_amount_increase > 0 and closePrice_pct_change_since_open > params['price_diff_threshold_increase'] and rsi_1h > params['rsi_threshold_increase']:  # Increase short
@@ -265,10 +264,10 @@ if __name__ == '__main__':
     'profit_min': 0.1,
     'zscore_threshold_open': 1.5,
     'price_diff_threshold_increase': 0.05,
-    'rsi_threshold_open': 80,
-    'rsi_threshold_increase': 80,
-    'rsi_threshold_close': 20,
-    'max_duration_hours': 5 * 24,
+    'rsi_threshold_open': 70,
+    'rsi_threshold_increase': 70,
+    'rsi_threshold_close': 30,
+    'max_duration_hours': 7 * 24,
   }
 
   # Load data
