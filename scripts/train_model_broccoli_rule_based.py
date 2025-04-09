@@ -48,10 +48,10 @@ def run_bot(df, amount, fee_open, fee_close, params, start_idx=0, end_idx=None):
     price_close_cur = current_row['closePrice']
     start_time = current_row['startTime']
     rsi_1h = current_row['rsi_1h']
-    close_price_diff_1h = current_row['closePrice_diff_1h']
+    zscore_1h = current_row['zscore_1h']
     funding_rate = current_row['fundingRate']
 
-    if not position_open and close_price_diff_1h > params['price_diff_threshold_open'] and rsi_1h > params['rsi_threshold_open']:  # Open short
+    if not position_open and zscore_1h > params['zscore_threshold_open'] and rsi_1h > params['rsi_threshold_open']:  # Open short
       position_amount_open = min(amount * params['position_amount_open'], total_amount)
       if position_amount_open > 0:
         position_amounts.append(position_amount_open)
@@ -116,6 +116,7 @@ def run_bot(df, amount, fee_open, fee_close, params, start_idx=0, end_idx=None):
           continue
 
       # Increase position if necessary
+      zscore_1h = current_row['zscore_1h']
       closePrice_pct_change_since_open = (price_close_cur - position_prices[-1]) / price_close_cur
       position_amount_increase = min(amount * params['position_amount_increase'], total_amount)
       if position_amount_increase > 0 and closePrice_pct_change_since_open > params['price_diff_threshold_increase'] and rsi_1h > params['rsi_threshold_increase']:  # Increase short
@@ -138,7 +139,7 @@ def evaluate(individual, df, amount, fee_open, fee_close):
     'position_amount_open': individual[0],
     'position_amount_increase': individual[1],
     'profit_min': individual[2],
-    'price_diff_threshold_open': individual[3],
+    'zscore_threshold_open': individual[3],
     'price_diff_threshold_increase': individual[4],
     'rsi_threshold_open': individual[5],
     'rsi_threshold_increase': individual[6],
@@ -221,7 +222,7 @@ def find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges):
     'position_amount_open': best_individual[0],
     'position_amount_increase': best_individual[1],
     'profit_min': best_individual[2],
-    'price_diff_threshold_open': best_individual[3],
+    'zscore_threshold_open': best_individual[3],
     'price_diff_threshold_increase': best_individual[4],
     'rsi_threshold_open': best_individual[5],
     'rsi_threshold_increase': best_individual[6],
@@ -249,7 +250,7 @@ if __name__ == '__main__':
     (0.05, 0.5),   # position_amount_open
     (0.01, 0.25),  # position_amount_increase
     (0.01, 0.5),   # profit_min
-    (0.01, 0.5),   # price_diff_threshold_open
+    (1, 3),        # zscore_threshold_open
     (0.005, 0.5),  # price_diff_threshold_increase
     (70, 90),      # rsi_threshold_open
     (70, 90),      # rsi_threshold_increase
@@ -261,7 +262,7 @@ if __name__ == '__main__':
     'position_amount_open': 0.1,
     'position_amount_increase': 0.05,
     'profit_min': 0.1,
-    'price_diff_threshold_open': 0.1,
+    'zscore_threshold_open': 1.5,
     'price_diff_threshold_increase': 0.05,
     'rsi_threshold_open': 80,
     'rsi_threshold_increase': 80,
@@ -283,6 +284,7 @@ if __name__ == '__main__':
   # Calculate features
   df_data['closePrice_diff_1h'] = df_data['closePrice'].pct_change(periods=12)  # 1 hour = 12 periods
   df_data['rsi_1h'] = calculate_rsi(df_data, period=12)  # 1 hour = 12 periods
+  df_data['zscore_1h'] = (df_data['closePrice'] - df_data['closePrice'].rolling(12).mean()) / df_data['closePrice'].rolling(12).std()
 
   # Drop records without features
   df_data = df_data.iloc[12:].reset_index(drop=True)
