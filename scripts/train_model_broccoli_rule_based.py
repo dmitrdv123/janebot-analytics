@@ -238,6 +238,7 @@ if __name__ == '__main__':
   # symbol = 'MELANIAUSDT'
   # symbol = 'TRUMPUSDT'
   # symbol = 'FARTCOINUSDT'
+  # symbol = 'MUBARAKUSDT'
   # symbol = 'BTCUSDT'
   interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
   time_start = '2024-01-01'
