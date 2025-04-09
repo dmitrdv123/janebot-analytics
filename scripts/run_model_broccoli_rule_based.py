@@ -394,6 +394,7 @@ class BybitTrader:
 
         df_features["close_diff"] = df_features["close"].pct_change(periods=self.config["period"])
         df_features["rsi"] = calculate_rsi(df_features, period=self.config["period"], column="close")
+        df_features["zscore"] = (df_features["close"] - df_features["close"].rolling(self.config["period"]).mean()) / df_features["close"].rolling(self.config["period"]).std()
 
         return df_features
 
@@ -404,11 +405,11 @@ class BybitTrader:
 
         current_row = self.df_features.iloc[-1]
         price = current_row["close"]
-        price_diff = current_row["close_diff"]
+        zscore = current_row["zscore"]
         rsi = current_row["rsi"]
 
         if not self.position:
-            should_open = price_diff > self.config["close_diff_open_threshold"] and rsi > self.config["rsi_open_threshold"]
+            should_open = zscore > self.config["zscore_open_threshold"] and rsi > self.config["rsi_open_threshold"]
             if should_open:
                 async with self.position_lock:
                     await self._open_position(price)
