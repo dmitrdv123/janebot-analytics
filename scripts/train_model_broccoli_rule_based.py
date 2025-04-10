@@ -246,9 +246,10 @@ if __name__ == '__main__':
   # symbol = 'PNUTUSDT'
   # symbol = '1000XUSDT'
   # symbol = 'ZEREBROUSDT'
-  symbol = 'GOATUSDT'
+  # symbol = 'GOATUSDT'
+  symbol = '10000SATSUSDT'
   interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
-  time_start = '2024-11-21'
+  time_start = '2024-03-16'
   amount = 10000
 
   fee_open = 0.0002
@@ -298,12 +299,12 @@ if __name__ == '__main__':
   df_data = df_data.iloc[12:].reset_index(drop=True)
 
   # Find optimal params
-  best_reward, best_params = find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges)
-  print(f'Best rewards: {best_reward:.4f}')
-  print(f'Best params: {best_params}')
+  # best_reward, best_params = find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges)
+  # print(f'Best rewards: {best_reward:.4f}')
+  # print(f'Best params: {best_params}')
 
   # Final run with optimal params
-  params = best_params
+  # params = best_params
   profit_baseline = run_baseline(df_data, fee_open, fee_close, params)
   total_amount, profits, positions, position_open_timestamps, position_close_timestamps = run_bot(df_data, amount, fee_open, fee_close, params)
 
