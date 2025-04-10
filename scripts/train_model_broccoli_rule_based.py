@@ -233,14 +233,22 @@ def find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges):
   return best_reward, best_params
 
 if __name__ == '__main__':
-  symbol = 'BROCCOLIUSDT'
+  # symbol = 'BROCCOLIUSDT'
   # symbol = 'MELANIAUSDT'
   # symbol = 'TRUMPUSDT'
   # symbol = 'FARTCOINUSDT'
   # symbol = 'MUBARAKUSDT'
   # symbol = 'BTCUSDT'
+  # symbol = 'SPXUSDT'
+  # symbol = 'ACTUSDT'
+  # symbol = 'LUCEUSDT'
+  # symbol = 'NEIROETHUSDT'
+  # symbol = 'PNUTUSDT'
+  # symbol = '1000XUSDT'
+  # symbol = 'ZEREBROUSDT'
+  symbol = 'GOATUSDT'
   interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
-  time_start = '2024-01-01'
+  time_start = '2024-11-21'
   amount = 10000
 
   fee_open = 0.0002
