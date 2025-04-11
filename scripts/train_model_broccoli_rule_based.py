@@ -233,23 +233,52 @@ def find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges):
   return best_reward, best_params
 
 if __name__ == '__main__':
-  # symbol = 'BROCCOLIUSDT'
+  symbol = 'BROCCOLIUSDT'
+  time_start = '2025-02-20'
+
   # symbol = 'MELANIAUSDT'
+  # time_start = '2025-01-24'
+
   # symbol = 'TRUMPUSDT'
+  # time_start = '2025-01-26'
+
   # symbol = 'FARTCOINUSDT'
+  # time_start = '2025-01-24'
+
   # symbol = 'MUBARAKUSDT'
+  # time_start = '2025-03-19'
+
   # symbol = 'BTCUSDT'
+  # time_start = '2024-01-01'
+
   # symbol = 'SPXUSDT'
+  # time_start = '2025-02-03'
+
   # symbol = 'ACTUSDT'
+  # time_start = '2024-12-20'
+
   # symbol = 'LUCEUSDT'
+  # time_start = '2024-12-13'
+
   # symbol = 'NEIROETHUSDT'
+  # time_start = '2024-11-08'
+
   # symbol = 'PNUTUSDT'
+  # time_start = '2024-11-21'
+
   # symbol = '1000XUSDT'
+  # time_start = '2024-11-13'
+
   # symbol = 'ZEREBROUSDT'
+  # time_start = '2025-01-10'
+
   # symbol = 'GOATUSDT'
-  symbol = '10000SATSUSDT'
+  # time_start = '2024-21-11'
+
+  # symbol = '10000SATSUSDT'
+  # time_start = '2024-01-04'
+
   interval = '5'  # Kline interval (1m, 5m, 15m, etc.)
-  time_start = '2024-03-16'
   amount = 10000
 
   fee_open = 0.0002
@@ -299,12 +328,12 @@ if __name__ == '__main__':
   df_data = df_data.iloc[12:].reset_index(drop=True)
 
   # Find optimal params
-  # best_reward, best_params = find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges)
-  # print(f'Best rewards: {best_reward:.4f}')
-  # print(f'Best params: {best_params}')
+  best_reward, best_params = find_optimal_params_ga(df_data, amount, fee_open, fee_close, param_ranges)
+  print(f'Best rewards: {best_reward:.4f}')
+  print(f'Best params: {best_params}')
 
   # Final run with optimal params
-  # params = best_params
+  params = best_params
   profit_baseline = run_baseline(df_data, fee_open, fee_close, params)
   total_amount, profits, positions, position_open_timestamps, position_close_timestamps = run_bot(df_data, amount, fee_open, fee_close, params)
 
@@ -327,6 +356,8 @@ if __name__ == '__main__':
   expected_value = 0.0
   profit_factor = 0.0
   reward_to_risk_ratio = 0.0
+  winning_trades = []
+  losing_trades = []
   if profits:
     total_gains = sum(p for p in profits if p > 0)
     total_losses = abs(sum(p for p in profits if p < 0))
@@ -358,6 +389,8 @@ if __name__ == '__main__':
 
   print(f'Total Trade Profit/Loss: {100 * total_trade_profit:.2f} %')
   print(f'Avg Profit per Trade: {100 * avg_profit_per_trade:.2f} %')
+  print(f'Winning Trades: {len(winning_trades)}')
+  print(f'Losing Trades: {len(losing_trades)}')
 
   print(f'Profit Factor: {profit_factor:.4f}')
   print(f'Expected Value (EV): {100 * expected_value:.4f} %')
